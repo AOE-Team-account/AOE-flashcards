@@ -319,6 +319,7 @@
     };
 
     let currentLang = 'en';
+
     const translations = {
       en: {
         welcome_back: "Welcome back",
@@ -367,7 +368,6 @@
         import_title: "Import Anki Deck (.apkg)",
         import_desc: "Select your .apkg file — real notes, fields, images & audio will be imported.",
         success_import: "Successfully imported {0} cards with clean text + real images & audio!",
-        import_failed: 'Import failed.<br><br>Please export from Anki with <strong>“Support older Anki versions”</strong> checked.',
         study_now_btn: "▶️ Study Now",
         half_year_btn: "🌍 Half-Year Mature Review",
         wrong_btn: "✕ Wrong",
@@ -426,7 +426,6 @@
         import_title: "导入 Anki 牌组 (.apkg)",
         import_desc: "选择您的 .apkg 文件 — 将导入真实笔记、字段、图片和音频。",
         success_import: "成功导入 {0} 张卡片，文本干净且带有真实图片和音频！",
-        import_failed: '导入失败。<br><br>请在 Anki 中勾选 <strong>“支持旧版 Anki”</strong> 后导出。',
         study_now_btn: "▶️ 开始学习",
         half_year_btn: "🌍 半年成熟复习",
         wrong_btn: "✕ 错误",
@@ -448,28 +447,72 @@
 
     const DAY_MS = 86400000;
     let SQL = null;
+    let dbPromise = null;
 
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
+
+    // IndexedDB setup
+    function initDB() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise((resolve, reject) => {
+        const request = indexedDB.open('AOEFlashcards', 1);
+        request.onupgradeneeded = e => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('decks')) {
+            db.createObjectStore('decks', { keyPath: 'id' });
+          }
+        };
+        request.onsuccess = e => resolve(e.target.result);
+        request.onerror = e => reject(e.target.error);
+      });
+      return dbPromise;
+    }
+
+    async function loadDecks() {
+      const db = await initDB();
+      return new Promise(resolve => {
+        const tx = db.transaction('decks', 'readonly');
+        const store = tx.objectStore('decks');
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+      });
+    }
+
+    async function saveDecks() {
+      const db = await initDB();
+      const tx = db.transaction('decks', 'readwrite');
+      const store = tx.objectStore('decks');
+      store.clear();
+      decks.forEach(deck => store.put(deck));
+      return new Promise(resolve => tx.oncomplete = resolve);
+    }
+
+    function loadSettings() {
+      const saved = localStorage.getItem('aoe_settings');
+      const savedLang = localStorage.getItem('aoe_lang');
+      if (saved) globalSettings = JSON.parse(saved);
+      if (savedLang) currentLang = savedLang;
+    }
+
+    function saveSettingsData() {
+      localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
+      localStorage.setItem('aoe_lang', currentLang);
+    }
+
+    async function loadData() {
+      loadSettings();
+      decks = await loadDecks();
+    }
+
+    async function saveData() {
+      await saveDecks();
+      saveSettingsData();
+    }
 
     async function initSQL() {
       if (SQL) return;
       const config = { locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` };
       SQL = await initSqlJs(config);
-    }
-
-    function loadData() {
-      const savedDecks = localStorage.getItem('aoe_decks');
-      const savedSettings = localStorage.getItem('aoe_settings');
-      const savedLang = localStorage.getItem('aoe_lang');
-      if (savedDecks) decks = JSON.parse(savedDecks);
-      if (savedSettings) globalSettings = JSON.parse(savedSettings);
-      if (savedLang) currentLang = savedLang;
-    }
-
-    function saveData() {
-      localStorage.setItem('aoe_decks', JSON.stringify(decks));
-      localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
-      localStorage.setItem('aoe_lang', currentLang);
     }
 
     function updateNav() {
@@ -740,8 +783,6 @@
           reader.onload = e => {
             editMedia = e.target.result;
             renderEditMediaPreview();
-            const audio = new Audio(editMedia);
-            audio.play().catch(() => {});
           };
           reader.readAsDataURL(blob);
         };
@@ -841,8 +882,6 @@
           const reader = new FileReader();
           reader.onload = e => { 
             currentMedia = e.target.result; 
-            const audio = new Audio(currentMedia);
-            audio.play().catch(() => {});
           };
           reader.readAsDataURL(blob);
         };
@@ -954,7 +993,7 @@
 
     function hideStudyModal() { document.getElementById('study-modal').style.display = 'none'; }
 
-   function showImportModal() {
+    function showImportModal() {
       document.getElementById('import-modal').style.display = 'flex';
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
@@ -971,7 +1010,7 @@
       document.getElementById('import-modal').style.display = 'none';
     }
 
-    // FIXED handleImportFile - properly handles modern Anki .apkg with collection.anki21
+    // Main import function with IndexedDB save
     async function handleImportFile(input) {
       const file = input.files[0];
       if (!file) return;
@@ -984,27 +1023,20 @@
       try {
         const zip = await JSZip.loadAsync(file);
 
-        // Prefer collection.anki21 (real data in modern exports), fallback to anki2
         let collectionEntry = zip.file('collection.anki21') || zip.file('collection.anki2');
-        if (!collectionEntry) throw new Error('No collection database found in the file.');
+        if (!collectionEntry) throw new Error('No collection database found');
 
         const dbBuffer = await collectionEntry.async('arraybuffer');
         const db = new SQL.Database(new Uint8Array(dbBuffer));
 
-        // Quick check to avoid dummy database
         const testStmt = db.prepare("SELECT flds FROM notes LIMIT 1");
         let isDummy = false;
         if (testStmt.step()) {
           const testFields = (testStmt.get()[0] || '').split('\x1f');
-          if (testFields[0] && testFields[0].includes("Please update to the latest Anki version")) {
-            isDummy = true;
-          }
+          if (testFields[0] && testFields[0].includes("Please update to the latest Anki version")) isDummy = true;
         }
         testStmt.free();
-
-        if (isDummy) {
-          throw new Error('This appears to be a dummy database. Please re-export from Anki with "Support older Anki versions" checked.');
-        }
+        if (isDummy) throw new Error('Dummy database detected. Please re-export from Anki with "Support older Anki versions" checked.');
 
         const mediaMap = {};
 
@@ -1108,30 +1140,21 @@
         };
 
         decks.push(newDeck);
-        saveData();
+        await saveData();   // Saves to IndexedDB
 
-        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
+        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ ${getText('success_import', importedCards.length)}</p>`;
         
         setTimeout(() => {
           hideImportModal();
           render(0);
-          if (newDeck.id) openDeck(newDeck.id);
+          openDeck(newDeck.id);
         }, 1500);
 
       } catch(e) {
-        console.error("Import error:", e);
+        console.error(e);
         status.innerHTML += `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
       }
     }
-
-    // Attach change listener for reliable iOS behavior
-    window.addEventListener('load', () => {
-      const importFileInput = document.getElementById('import-file');
-      if (importFileInput) {
-        importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
-      }
-      init();
-    });
 
     function showSettingsModal() {
       document.getElementById('settings-modal').style.display = 'flex';
@@ -1172,7 +1195,7 @@
       globalSettings.intervals = Array.from(inputs).map(inp => parseInt(inp.value) || 0);
 
       currentLang = document.getElementById('language-select').value;
-      saveData();
+      saveSettingsData();
 
       hideSettingsModal();
       updateNav();
@@ -1180,8 +1203,8 @@
       alert(currentLang === 'zh' ? '✅ 设置已保存' : '✅ Settings saved.');
     }
 
-    function init() {
-      loadData();
+    async function init() {
+      await loadData();
       updateNav();
       if (decks.length === 0) {
         decks.push({
@@ -1191,12 +1214,19 @@
           newPerDay: 20,
           cards: []
         });
-        saveData();
+        await saveData();
       }
       navigateTo(0);
     }
 
-    window.onload = init;
+    // Attach import listener for reliable iOS behavior
+    window.addEventListener('load', () => {
+      const importFileInput = document.getElementById('import-file');
+      if (importFileInput) {
+        importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
+      }
+      init();
+    });
   </script>
 </body>
 </html>
