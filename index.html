@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
+  <!-- iOS Home Screen Settings (Added/Improved) -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="AOE flashcards">
@@ -13,7 +14,6 @@
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.min.js"></script>
-  
   <style>
     :root { --primary: #6d28d9; }
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -113,6 +113,7 @@
   </div>
 
   <div id="main-content" class="container"></div>
+
   <!-- CREATE DECK MODAL -->
   <div id="create-deck-modal" class="modal" onclick="if(event.target.id==='create-deck-modal')hideCreateDeckModal()">
     <div class="modal-content" onclick="event.stopImmediatePropagation()">
@@ -248,13 +249,7 @@
     <div class="modal-content" onclick="event.stopImmediatePropagation()">
       <h2 id="import-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
       <p id="import-desc" style="color:#64748b;margin-bottom:16px;"></p>
-      
-      <div style="margin-bottom:20px;">
-        <label style="display:block;margin-bottom:8px;font-weight:600;color:#1e2937;" id="import-file-label"></label>
-        <input type="file" id="import-file" accept=".apkg,.colpkg,.ofc" 
-               style="width:100%; padding:16px; border:2px dashed #cbd5e1; border-radius:16px; font-size:17px; background:#f8fafc;">
-      </div>
-
+      <input type="file" id="import-file" accept=".apkg,.colpkg,.ofc" style="width:100%;padding:16px;border:2px dashed #cbd5e1;border-radius:16px;" onchange="handleImportFile(this)">
       <div id="import-status" style="margin-top:16px;min-height:120px;color:#64748b;font-size:15px;"></div>
       <button onclick="hideImportModal()" class="btn" style="width:100%;margin-top:20px;">Cancel</button>
     </div>
@@ -723,154 +718,105 @@
       }
     }
 
-        async function handleImportFile(input) {
-      const file = input.files[0];
-      if (!file) return;
-
-      const status = document.getElementById('import-status');
-      status.innerHTML = `<p>📦 Loading ${file.name}... (this may take a few seconds for large decks)</p>`;
-
-      await initSQL();
-
+    async function toggleEditRecording() {
+      const btn = document.getElementById('edit-record-btn');
+      if (isEditRecording) {
+        editMediaRecorder.stop();
+        isEditRecording = false;
+        btn.innerHTML = getText('live_record');
+        return;
+      }
       try {
-        const zip = await JSZip.loadAsync(file);
-
-        // Prefer collection.anki21 (newer format), fallback to collection.anki2
-        let collectionEntry = zip.file('collection.anki21') || zip.file('collection.anki2');
-        if (!collectionEntry) {
-          throw new Error('No collection database found in the .apkg file');
-        }
-
-        const dbBuffer = await collectionEntry.async('arraybuffer');
-        const db = new SQL.Database(new Uint8Array(dbBuffer));
-
-        // Quick check if it's the dummy message
-        const testStmt = db.prepare("SELECT flds FROM notes LIMIT 1");
-        if (testStmt.step()) {
-          const testFields = (testStmt.get()[0] || '').split('\x1f');
-          if (testFields[0] && testFields[0].includes("Please update to the latest Anki version")) {
-            throw new Error('Dummy database detected. Please re-export from Anki with "Support older Anki versions" checked and try again.');
-          }
-        }
-        testStmt.free();
-
-        const mediaMap = {};
-
-        // Media handling (unchanged)
-        const mediaJsonFile = zip.file('media');
-        if (mediaJsonFile) {
-          const mediaJsonText = await mediaJsonFile.async('string');
-          const mediaFilenameMap = JSON.parse(mediaJsonText);
-
-          for (const [indexStr, realFilename] of Object.entries(mediaFilenameMap)) {
-            const entry = zip.file(indexStr);
-            if (entry) {
-              const data = await entry.async('base64');
-              const ext = (realFilename.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
-              mediaMap[indexStr] = dataUrl;
-              mediaMap[realFilename] = dataUrl;
-            }
-          }
-        }
-
-        // Fallback media scan
-        if (Object.keys(mediaMap).length === 0) {
-          const mediaFiles = Object.keys(zip.files).filter(name => 
-            name.match(/^\d+$/) || name.match(/\.(jpg|png|gif|mp3|ogg|wav|mp4|webm)$/i)
-          );
-          for (const fname of mediaFiles) {
-            const entry = zip.file(fname);
-            if (entry) {
-              const data = await entry.async('base64');
-              const ext = (fname.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
-              mediaMap[fname] = dataUrl;
-            }
-          }
-        }
-
-        const notesStmt = db.prepare("SELECT flds FROM notes");
-        const importedCards = [];
-
-        while (notesStmt.step()) {
-          const row = notesStmt.get();
-          const fields = (row[0] || '').split('\x1f');
-          let front = fields[0] || 'No front';
-          let back = fields[1] || (fields.slice(1).join(' • ') || 'No back');
-
-          let cardImage = null;
-          let cardMedia = null;
-
-          Object.keys(mediaMap).forEach(key => {
-            const dataUrl = mediaMap[key];
-
-            const imgRegex = new RegExp(`<img[^>]*src=["']${key}["'][^>]*>`, 'gi');
-            if (imgRegex.test(front)) {
-              cardImage = dataUrl;
-              front = front.replace(imgRegex, '').trim();
-            }
-            if (imgRegex.test(back)) {
-              cardImage = dataUrl;
-              back = back.replace(imgRegex, '').trim();
-            }
-
-            const soundRegex = new RegExp(`\\[sound:${key}\\]`, 'gi');
-            if (soundRegex.test(front)) {
-              cardMedia = dataUrl;
-              front = front.replace(soundRegex, '').trim();
-            }
-            if (soundRegex.test(back)) {
-              cardMedia = dataUrl;
-              back = back.replace(soundRegex, '').trim();
-            }
-          });
-
-          importedCards.push({
-            id: generateId(),
-            front: front,
-            back: back,
-            image: cardImage,
-            media: cardMedia,
-            section: 1,
-            lastReviewed: null
-          });
-        }
-
-        notesStmt.free();
-
-        const deckName = file.name.replace(/\.(apkg|colpkg|ofc)$/i, '') || 'Imported Deck';
-        const newDeck = {
-          id: generateId(),
-          name: deckName,
-          description: `Imported from ${file.name} — ${importedCards.length} cards`,
-          newPerDay: globalSettings.newWordsPerDay,
-          cards: importedCards,
-          color: '#6d28d9'
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        editMediaRecorder = new MediaRecorder(stream);
+        editAudioChunks = [];
+        editMediaRecorder.ondataavailable = e => editAudioChunks.push(e.data);
+        editMediaRecorder.onstop = () => {
+          const blob = new Blob(editAudioChunks, { type: 'audio/webm' });
+          const reader = new FileReader();
+          reader.onload = e => {
+            editMedia = e.target.result;
+            renderEditMediaPreview();
+            const audio = new Audio(editMedia);
+            audio.play().catch(() => {});
+          };
+          reader.readAsDataURL(blob);
         };
+        editMediaRecorder.start();
+        isEditRecording = true;
+        btn.textContent = '⏹ Stop Recording';
+      } catch(e) { 
+        alert('Microphone permission required for live recording'); 
+      }
+    }
 
-        decks.push(newDeck);
+    function deleteEditMedia() {
+      editMedia = null;
+      renderEditMediaPreview();
+    }
+
+    function hideEditCardModal() {
+      document.getElementById('edit-card-modal').style.display = 'none';
+      currentEditCardId = null;
+      editImage = null;
+      editMedia = null;
+    }
+
+    function saveEditedCard() {
+      const deck = decks.find(d => d.id === currentDeckId);
+      const card = deck.cards.find(c => c.id === currentEditCardId);
+      if (card) {
+        card.front = document.getElementById('edit-front').value.trim();
+        card.back = document.getElementById('edit-back').value.trim();
+        card.image = editImage;
+        card.media = editMedia;
         saveData();
+      }
+      hideEditCardModal();
+      openDeck(currentDeckId);
+    }
 
-        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards!</p>`;
-        
-        setTimeout(() => {
-          hideImportModal();
-          render(0);
-          if (newDeck.id) openDeck(newDeck.id);
-        }, 1500);
+    function deleteCard(cardId) {
+      if (!confirm(getText('delete'))) return;
+      const deck = decks.find(d => d.id === currentDeckId);
+      deck.cards = deck.cards.filter(c => c.id !== cardId);
+      saveData();
+      openDeck(currentDeckId);
+    }
 
-      } catch(e) {
-        console.error("Import error:", e);
-        status.innerHTML += `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
+    function showAddCardModal() {
+      document.getElementById('add-card-modal').style.display = 'flex';
+      document.getElementById('card-front').value = '';
+      document.getElementById('card-back').value = '';
+      currentImage = null;
+      currentMedia = null;
+
+      document.getElementById('add-card-title').textContent = getText('add_new_card');
+      document.getElementById('card-front').placeholder = getText('front_placeholder');
+      document.getElementById('card-back').placeholder = getText('back_placeholder');
+      document.getElementById('image-label-add').textContent = getText('image');
+      document.getElementById('sound-label-add').textContent = getText('sound_video');
+      document.getElementById('record-btn').innerHTML = getText('live_record');
+      document.getElementById('upload-btn-add').textContent = getText('upload');
+      document.getElementById('save-card-btn').textContent = getText('save_changes');
+    }
+    function hideAddCardModal() { document.getElementById('add-card-modal').style.display = 'none'; }
+
+    function previewImage(input) {
+      const file = input.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = e => currentImage = e.target.result;
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function previewMedia(input) {
+      const file = input.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = e => currentMedia = e.target.result;
+        reader.readAsDataURL(file);
       }
     }
 
@@ -1005,26 +951,17 @@
 
     function hideStudyModal() { document.getElementById('study-modal').style.display = 'none'; }
 
-   function showImportModal() {
+    function showImportModal() {
       document.getElementById('import-modal').style.display = 'flex';
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
       document.getElementById('import-status').innerHTML = '';
-      
-      const fileInput = document.getElementById('import-file');
-      fileInput.value = '';   // clear previous selection
-      
-      const label = document.getElementById('import-file-label');
-      if (label) label.textContent = currentLang === 'zh' ? '选择 .apkg 文件' : 'Select your .apkg / .colpkg / .ofc file';
     }
+    function hideImportModal() { document.getElementById('import-modal').style.display = 'none'; }
 
-    function hideImportModal() {
-      document.getElementById('import-modal').style.display = 'none';
-    }
     async function handleImportFile(input) {
       const file = input.files[0];
       if (!file) return;
-
       const status = document.getElementById('import-status');
       status.innerHTML = `<p>📦 Loading ${file.name}... (this may take a few seconds for large decks)</p>`;
 
@@ -1156,17 +1093,6 @@
         status.innerHTML += `<p style="color:#ef4444;">${getText('import_failed')}</p>`;
       }
     }
-
-    // Attach the event listener once when the page loads (this is the key fix for iOS)
-    window.addEventListener('load', () => {
-      const importFileInput = document.getElementById('import-file');
-      if (importFileInput) {
-        importFileInput.addEventListener('change', () => {
-          handleImportFile(importFileInput);
-        });
-      }
-      init();   // your original init
-    });
 
     function showSettingsModal() {
       document.getElementById('settings-modal').style.display = 'flex';
