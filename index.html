@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
-  <!-- iOS Home Screen Settings (Added/Improved) -->
+  <!-- iOS Home Screen Settings -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="AOE flashcards">
@@ -14,6 +14,7 @@
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.min.js"></script>
+  
   <style>
     :root { --primary: #6d28d9; }
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -244,12 +245,18 @@
     </div>
   </div>
 
-  <!-- IMPORT MODAL -->
+  <!-- IMPORT MODAL - Fixed for iPhone -->
   <div id="import-modal" class="modal" onclick="if(event.target.id==='import-modal')hideImportModal()">
     <div class="modal-content" onclick="event.stopImmediatePropagation()">
       <h2 id="import-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
       <p id="import-desc" style="color:#64748b;margin-bottom:16px;"></p>
-      <input type="file" id="import-file" accept=".apkg,.colpkg,.ofc" style="width:100%;padding:16px;border:2px dashed #cbd5e1;border-radius:16px;" onchange="handleImportFile(this)">
+      
+      <div style="margin-bottom:20px;">
+        <label style="display:block;margin-bottom:8px;font-weight:600;color:#1e2937;" id="import-file-label"></label>
+        <input type="file" id="import-file" accept=".apkg,.colpkg,.ofc" 
+               style="width:100%; padding:16px; border:2px dashed #cbd5e1; border-radius:16px; font-size:17px; background:#f8fafc;">
+      </div>
+
       <div id="import-status" style="margin-top:16px;min-height:120px;color:#64748b;font-size:15px;"></div>
       <button onclick="hideImportModal()" class="btn" style="width:100%;margin-top:20px;">Cancel</button>
     </div>
@@ -951,13 +958,23 @@
 
     function hideStudyModal() { document.getElementById('study-modal').style.display = 'none'; }
 
+    // === IMPROVED IMPORT MODAL FUNCTIONS ===
     function showImportModal() {
       document.getElementById('import-modal').style.display = 'flex';
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
       document.getElementById('import-status').innerHTML = '';
+      
+      const fileInput = document.getElementById('import-file');
+      fileInput.value = '';
+      
+      const label = document.getElementById('import-file-label');
+      if (label) label.textContent = currentLang === 'zh' ? '选择 .apkg 文件' : 'Select your .apkg / .colpkg / .ofc file';
     }
-    function hideImportModal() { document.getElementById('import-modal').style.display = 'none'; }
+
+    function hideImportModal() {
+      document.getElementById('import-modal').style.display = 'none';
+    }
 
     async function handleImportFile(input) {
       const file = input.files[0];
