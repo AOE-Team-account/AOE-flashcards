@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <!-- iOS Home Screen Settings (Added/Improved) -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AOE flashcards">
+  <link rel="apple-touch-icon" href="AOE_flashcards_icon.png">
+
+  <title>AOE flashcards</title>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.min.js"></script>
+  <style>
+    :root { --primary: #6d28d9; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f8fafc;
+      color: #1e2937;
+      min-height: 100vh;
+    }
+    .header {
+      background: white;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 14px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    .logo { font-size: 22px; font-weight: 700; color: var(--primary); letter-spacing: -0.5px; }
+    .nav-btn {
+      padding: 8px 20px;
+      border-radius: 9999px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nav-btn.active { background: var(--primary); color: white; }
+    .container { max-width: 640px; margin: 0 auto; padding: 16px; }
+    .card {
+      background: white;
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+      margin-bottom: 20px;
+    }
+    .btn { 
+      padding: 14px 28px; 
+      border-radius: 9999px; 
+      font-weight: 600; 
+      cursor: pointer; 
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .modal {
+      position: fixed; inset: 0; background: rgba(15,23,42,0.85);
+      display: none; align-items: flex-end; z-index: 200;
+    }
+    .modal-content {
+      background: white; width: 100%; max-width: 640px;
+      border-radius: 28px 28px 0 0; padding: 28px;
+      max-height: 90vh; overflow-y: auto;
+    }
+    .flashcard {
+      perspective: 1500px; height: 460px; margin: 30px 0; cursor: pointer;
+    }
+    .flashcard-inner {
+      position: relative; width: 100%; height: 100%;
+      transition: transform 0.7s cubic-bezier(0.23,1,0.32,1);
+      transform-style: preserve-3d;
+      border-radius: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.12);
+    }
+    .flipped .flashcard-inner { transform: rotateY(180deg); }
+    .flashcard-face {
+      position: absolute; width: 100%; height: 100%;
+      backface-visibility: hidden;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: white; border-radius: 28px; padding: 40px 32px;
+      border: 1px solid #e2e8f0; text-align: center;
+    }
+    .flashcard-back { transform: rotateY(180deg); }
+    input, textarea, select {
+      width: 100%; padding: 16px 20px; border: 1px solid #cbd5e1;
+      border-radius: 16px; margin-bottom: 16px; font-size: 17px;
+    }
+    .audio-player { width: 100%; margin: 16px 0; }
+    .color-dot {
+      width: 38px; height: 38px; border-radius: 50%; margin: 6px;
+      cursor: pointer; border: 4px solid transparent; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .color-dot.selected { border-color: #1e2937; transform: scale(1.15); }
+    .section-pill {
+      background: #f1f5f9; padding: 12px 18px; border-radius: 9999px;
+      text-align: center; font-size: 15px; font-weight: 600;
+    }
+    .media-preview { max-height: 160px; border-radius: 12px; margin: 12px 0; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">AOE flashcards</div>
+    <div style="display:flex;gap:12px;" id="nav-container"></div>
+  </div>
+
+  <div id="main-content" class="container"></div>
+
+  <!-- CREATE DECK MODAL -->
+  <div id="create-deck-modal" class="modal" onclick="if(event.target.id==='create-deck-modal')hideCreateDeckModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="create-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      <label id="deck-title-label"></label>
+      <input type="text" id="deck-title" placeholder="">
+      <label id="deck-desc-label" style="margin-top:16px;"></label>
+      <input type="text" id="deck-desc" placeholder="">
+      <label id="new-per-day-label" style="margin-top:16px;"></label>
+      <input type="number" id="new-per-day" value="20" min="1">
+      <label id="color-label" style="margin-top:16px;"></label>
+      <div id="color-picker" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
+      <button onclick="saveNewDeck()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;font-size:18px;" id="create-btn"></button>
+    </div>
+  </div>
+
+  <!-- DECK DETAIL MODAL -->
+  <div id="deck-detail-modal" class="modal" onclick="if(event.target.id==='deck-detail-modal')hideDeckDetailModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div id="deck-name-detail" style="font-weight:700;font-size:24px;"></div>
+          <div id="deck-desc-detail" style="color:#64748b;margin-top:4px;"></div>
+        </div>
+        <button onclick="deleteCurrentDeck()" id="delete-deck-btn" style="background:#fee2e2;color:#ef4444;padding:10px 20px;border-radius:9999px;"></button>
+      </div>
+
+      <div id="section-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin:28px 0 24px;"></div>
+
+      <button onclick="startStudySession('normal')" class="btn btn-primary" style="width:100%;padding:18px;font-size:18px;margin-bottom:12px;" id="study-now-btn"></button>
+      <button onclick="startStudySession('mature')" class="btn" style="width:100%;padding:18px;font-size:18px;background:#e2e8f0;" id="half-year-btn"></button>
+
+      <div style="margin-top:32px;display:flex;gap:12px;">
+        <button onclick="showAddCardModal()" class="btn" style="flex:1;background:#e2e8f0;" id="add-card-btn"></button>
+        <button onclick="showImportModal()" class="btn" style="flex:1;background:#e2e8f0;" id="import-apkg-btn"></button>
+      </div>
+
+      <h3 id="all-cards-title" style="margin:32px 0 12px;font-weight:600;"></h3>
+      <div id="card-list" style="max-height:400px;overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <!-- EDIT CARD MODAL -->
+  <div id="edit-card-modal" class="modal" onclick="if(event.target.id==='edit-card-modal')hideEditCardModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="edit-card-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      <textarea id="edit-front" rows="3"></textarea>
+      <textarea id="edit-back" rows="3"></textarea>
+
+      <div style="margin-top:24px;border-top:1px solid #e2e8f0;padding-top:20px;">
+        <label id="image-label"></label>
+        <div id="edit-image-preview-container" style="margin:12px 0;"></div>
+        <div style="display:flex;gap:12px;">
+          <input type="file" id="edit-card-image" accept="image/*" onchange="previewEditImage(this)" style="flex:1;">
+          <button onclick="deleteEditImage()" class="btn" style="background:#fee2e2;color:#ef4444;" id="delete-image-btn"></button>
+        </div>
+      </div>
+
+      <div style="margin-top:24px;border-top:1px solid #e2e8f0;padding-top:20px;">
+        <label id="sound-label"></label>
+        <div id="edit-media-preview-container" style="margin:12px 0;"></div>
+        <div style="display:flex;gap:12px;">
+          <button onclick="toggleEditRecording()" id="edit-record-btn" class="btn" style="flex:1;"></button>
+          <input type="file" id="edit-card-media" accept="audio/*,video/*" onchange="previewEditMedia(this)" style="display:none;">
+          <button onclick="document.getElementById('edit-card-media').click()" class="btn" style="flex:1;background:#e2e8f0;" id="upload-btn"></button>
+          <button onclick="deleteEditMedia()" class="btn" style="background:#fee2e2;color:#ef4444;" id="delete-media-btn"></button>
+        </div>
+      </div>
+
+      <button onclick="saveEditedCard()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;font-size:18px;" id="save-changes-btn"></button>
+      <button onclick="hideEditCardModal()" class="btn" style="width:100%;margin-top:12px;background:#e2e8f0;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ADD CARD MODAL -->
+  <div id="add-card-modal" class="modal" onclick="if(event.target.id==='add-card-modal')hideAddCardModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="add-card-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      <textarea id="card-front" rows="3" placeholder=""></textarea>
+      <textarea id="card-back" rows="3" placeholder=""></textarea>
+
+      <div style="margin-top:20px;">
+        <label id="image-label-add"></label>
+        <input type="file" id="card-image" accept="image/*" onchange="previewImage(this)">
+      </div>
+      <div style="margin-top:16px;">
+        <label id="sound-label-add"></label>
+        <div style="display:flex;gap:12px;">
+          <button onclick="toggleRecording()" id="record-btn" class="btn" style="flex:1;"></button>
+          <input type="file" id="card-media" accept="audio/*,video/*" onchange="previewMedia(this)" style="display:none;">
+          <button onclick="document.getElementById('card-media').click()" class="btn" style="flex:1;background:#e2e8f0;" id="upload-btn-add"></button>
+        </div>
+      </div>
+
+      <button onclick="saveCard()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;font-size:18px;" id="save-card-btn"></button>
+    </div>
+  </div>
+
+  <!-- STUDY MODAL -->
+  <div id="study-modal" class="modal" onclick="if(event.target.id==='study-modal')hideStudyModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+        <div id="study-deck-name" style="font-weight:700;font-size:20px;"></div>
+        <div id="study-progress" style="color:#64748b;"></div>
+      </div>
+
+      <div id="flashcard" class="flashcard" onclick="flipCard()">
+        <div id="flashcard-inner" class="flashcard-inner">
+          <div class="flashcard-face" id="front-face">
+            <div id="front-text" style="font-size:26px;font-weight:600;margin-bottom:20px;"></div>
+            <img id="front-image" style="max-height:240px;border-radius:16px;display:none;margin-bottom:16px;">
+            <audio id="front-audio" controls class="audio-player" style="display:none;"></audio>
+            <video id="front-video" controls style="max-height:240px;border-radius:16px;display:none;width:100%;"></video>
+          </div>
+          <div class="flashcard-face flashcard-back" id="back-face">
+            <div id="back-text" style="font-size:26px;font-weight:600;margin-bottom:20px;"></div>
+            <img id="back-image" style="max-height:240px;border-radius:16px;display:none;margin-bottom:16px;">
+            <audio id="back-audio" controls class="audio-player" style="display:none;"></audio>
+            <video id="back-video" controls style="max-height:240px;border-radius:16px;display:none;width:100%;"></video>
+          </div>
+        </div>
+      </div>
+
+      <div id="rating-buttons" style="display:none;margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <button onclick="rateCard(false)" id="wrong-btn" style="background:#fee2e2;color:#b91c1c;padding:18px;font-size:18px;border-radius:9999px;"></button>
+        <button onclick="rateCard(true)" class="btn btn-primary" id="correct-btn" style="padding:18px;font-size:18px;"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMPORT MODAL -->
+  <div id="import-modal" class="modal" onclick="if(event.target.id==='import-modal')hideImportModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="import-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      <p id="import-desc" style="color:#64748b;margin-bottom:16px;"></p>
+      <input type="file" id="import-file" accept=".apkg,.colpkg,.ofc" style="width:100%;padding:16px;border:2px dashed #cbd5e1;border-radius:16px;" onchange="handleImportFile(this)">
+      <div id="import-status" style="margin-top:16px;min-height:120px;color:#64748b;font-size:15px;"></div>
+      <button onclick="hideImportModal()" class="btn" style="width:100%;margin-top:20px;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal" onclick="if(event.target.id==='settings-modal')hideSettingsModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="settings-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      
+      <label id="global-new-label"></label>
+      <input type="number" id="global-new-per-day" value="20" style="margin-bottom:24px;">
+
+      <label id="num-sections-label" style="margin-bottom:12px;display:block;"></label>
+      <input type="number" id="num-sections" value="5" min="3" max="10" style="margin-bottom:24px;">
+
+      <div id="intervals-container"></div>
+
+      <label id="wrong-section-label" style="margin:24px 0 8px;display:block;"></label>
+      <input type="number" id="wrong-section" value="3" min="2" max="5" style="margin-bottom:24px;">
+
+      <label id="half-year-label" class="flex items-center gap-3">
+        <input type="checkbox" id="half-year-toggle" checked>
+        <span id="half-year-text"></span>
+      </label>
+
+      <label id="language-label" style="margin:24px 0 8px;display:block;"></label>
+      <select id="language-select" style="width:100%;padding:16px 20px;border:1px solid #cbd5e1;border-radius:16px;">
+        <option value="en">English</option>
+        <option value="zh">中文</option>
+      </select>
+
+      <button onclick="saveSettings()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;" id="save-settings-btn"></button>
+    </div>
+  </div>
+
+  <script>
+    let decks = [];
+    let currentDeckId = null;
+    let currentStudySession = { cards: [], index: 0, mode: "normal", deckId: null };
+    let currentEditCardId = null;
+
+    let editImage = null;
+    let editMedia = null;
+    let editMediaRecorder = null;
+    let editAudioChunks = [];
+    let isEditRecording = false;
+
+    let currentImage = null;
+    let currentMedia = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+
+    let globalSettings = {
+      newWordsPerDay: 20,
+      numSections: 5,
+      intervals: [0, 3, 7, 30, 365],
+      wrongSection: 3,
+      halfYearMatureReview: true
+    };
+
+    let currentLang = 'en';
+
+    const translations = {
+      en: {
+        welcome_back: "Welcome back",
+        cards_waiting: "You have {0} cards waiting for review today.",
+        total_cards: "Total Cards",
+        due_today: "Due Today",
+        reviewed: "Reviewed",
+        your_decks: "Your Decks",
+        import: "Import",
+        new_deck: "+ New Deck",
+        no_decks: "No decks yet.",
+        tap_new: 'Tap “New Deck” to begin.',
+        create_new_deck: "Create New Deck",
+        deck_title: "Deck Title",
+        description_optional: "Description (optional)",
+        new_words_per_day: "New Words Per Day",
+        color: "Color",
+        create_deck_btn: "Create Deck",
+        delete_deck: "Delete Deck",
+        study_now: "Study Now",
+        half_year_review: "Half-Year Mature Review",
+        add_card: "+ Add Card",
+        import_apkg: "Import .apkg / .colpkg / .ofc",
+        all_cards: "All Cards",
+        edit: "Edit",
+        delete: "Delete",
+        edit_card: "Edit Card",
+        image: "Image",
+        sound_video: "Sound / Video",
+        no_image: "No image attached",
+        no_sound: "No sound or video attached",
+        live_record: "Live Record Audio",
+        upload: "Upload",
+        delete_btn: "Delete",
+        save_changes: "Save Changes",
+        add_new_card: "Add New Card",
+        front_placeholder: "Front (question / term)",
+        back_placeholder: "Back (answer / definition)",
+        global_settings: "Global Settings",
+        new_words_global: "New Words Per Day (global default)",
+        num_sections: "Number of Review Sections",
+        review_intervals: "Review Intervals (days) for each section",
+        wrong_section_label: "Wrong answer always goes to section",
+        enable_half_year: "Enable half-year mature review from section 5",
+        save_settings: "Save Settings",
+        import_title: "Import Anki Deck (.apkg)",
+        import_desc: "Select your .apkg file — real notes, fields, images & audio will be imported.",
+        success_import: "Successfully imported {0} cards with clean text + real images & audio!",
+        import_failed: 'Import failed.<br><br>Please export from Anki with <strong>“Support older Anki versions”</strong> checked.',
+        study_now_btn: "▶️ Study Now",
+        half_year_btn: "🌍 Half-Year Mature Review",
+        wrong_btn: "✕ Wrong",
+        correct_btn: "✓ Correct",
+        section_new: "New Words",
+        section_review: "Review ({0} days)",
+        section_done: "Done! (Yearly)",
+        nav_home: "🏠 Home",
+        nav_create: "✚ Create",
+        nav_settings: "⚙️ Settings"
+      },
+      zh: {
+        welcome_back: "欢迎回来",
+        cards_waiting: "今天有 {0} 张卡片等待复习。",
+        total_cards: "总卡片",
+        due_today: "今日到期",
+        reviewed: "已复习",
+        your_decks: "您的牌组",
+        import: "导入",
+        new_deck: "+ 新牌组",
+        no_decks: "还没有牌组。",
+        tap_new: '点击“新牌组”开始。',
+        create_new_deck: "创建新牌组",
+        deck_title: "牌组名称",
+        description_optional: "描述（可选）",
+        new_words_per_day: "每日新词数量",
+        color: "颜色",
+        create_deck_btn: "创建牌组",
+        delete_deck: "删除牌组",
+        study_now: "开始学习",
+        half_year_review: "半年成熟复习",
+        add_card: "+ 添加卡片",
+        import_apkg: "导入 .apkg / .colpkg / .ofc",
+        all_cards: "所有卡片",
+        edit: "编辑",
+        delete: "删除",
+        edit_card: "编辑卡片",
+        image: "图片",
+        sound_video: "声音 / 视频",
+        no_image: "未附加图片",
+        no_sound: "未附加声音或视频",
+        live_record: "实时录制音频",
+        upload: "上传",
+        delete_btn: "删除",
+        save_changes: "保存更改",
+        add_new_card: "添加新卡片",
+        front_placeholder: "正面（问题 / 词语）",
+        back_placeholder: "背面（答案 / 定义）",
+        global_settings: "全局设置",
+        new_words_global: "每日新词数量（全局默认）",
+        num_sections: "复习区间数量",
+        review_intervals: "每个区间的复习间隔（天）",
+        wrong_section_label: "答错总是进入区间",
+        enable_half_year: "启用第5区间半年成熟复习",
+        save_settings: "保存设置",
+        import_title: "导入 Anki 牌组 (.apkg)",
+        import_desc: "选择您的 .apkg 文件 — 将导入真实笔记、字段、图片和音频。",
+        success_import: "成功导入 {0} 张卡片，文本干净且带有真实图片和音频！",
+        import_failed: '导入失败。<br><br>请在 Anki 中勾选 <strong>“支持旧版 Anki”</strong> 后导出。',
+        study_now_btn: "▶️ 开始学习",
+        half_year_btn: "🌍 半年成熟复习",
+        wrong_btn: "✕ 错误",
+        correct_btn: "✓ 正确",
+        section_new: "新词",
+        section_review: "复习 ({0} 天)",
+        section_done: "已完成！(每年)",
+        nav_home: "🏠 首页",
+        nav_create: "✚ 创建",
+        nav_settings: "⚙️ 设置"
+      }
+    };
+
+    function getText(key, ...args) {
+      let text = translations[currentLang][key] || translations.en[key] || key;
+      args.forEach((arg, i) => {
+        text = text.replace(`{${i}}`, arg);
+      });
+      return text;
+    }
+
+    const DAY_MS = 86400000;
+    let SQL = null;
+
+    function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
+
+    async function initSQL() {
+      if (SQL) return;
+      const config = { locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` };
+      SQL = await initSqlJs(config);
+    }
+
+    function loadData() {
+      const savedDecks = localStorage.getItem('aoe_decks');
+      const savedSettings = localStorage.getItem('aoe_settings');
+      const savedLang = localStorage.getItem('aoe_lang');
+      if (savedDecks) decks = JSON.parse(savedDecks);
+      if (savedSettings) globalSettings = JSON.parse(savedSettings);
+      if (savedLang) currentLang = savedLang;
+    }
+
+    function saveData() {
+      localStorage.setItem('aoe_decks', JSON.stringify(decks));
+      localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
+      localStorage.setItem('aoe_lang', currentLang);
+    }
+
+    function updateNav() {
+      const container = document.getElementById('nav-container');
+      container.innerHTML = `
+        <div onclick="navigateTo(0)" class="nav-btn active" id="nav-0">${getText('nav_home')}</div>
+        <div onclick="navigateTo(1)" class="nav-btn" id="nav-1">${getText('nav_create')}</div>
+        <div onclick="navigateTo(4)" class="nav-btn" id="nav-4">${getText('nav_settings')}</div>
+      `;
+    }
+
+    function navigateTo(tab) {
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      const activeBtn = document.getElementById(`nav-${tab}`);
+      if (activeBtn) activeBtn.classList.add('active');
+      if (tab === 4) showSettingsModal();
+      else if (tab === 1) showCreateDeckModal();
+      else render(tab);
+    }
+
+    function render(tab) {
+      const main = document.getElementById('main-content');
+      if (tab === 0) {
+        main.innerHTML = `
+          <div class="card" style="background: linear-gradient(135deg,#6d28d9,#a855f7);color:white;padding:32px 24px;border-radius:28px;">
+            <h2 style="font-size:28px;font-weight:700;">${getText('welcome_back')}</h2>
+            <p style="margin-top:8px;opacity:0.9;">${getText('cards_waiting', getDueToday())}</p>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:24px;">
+              <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
+                <div style="font-size:34px;font-weight:700;">${getTotalCards()}</div>
+                <div style="font-size:14px;">${getText('total_cards')}</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
+                <div style="font-size:34px;font-weight:700;">${getDueToday()}</div>
+                <div style="font-size:14px;">${getText('due_today')}</div>
+              </div>
+              <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
+                <div style="font-size:34px;font-weight:700;">0</div>
+                <div style="font-size:14px;">${getText('reviewed')}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin:32px 0 16px;display:flex;justify-content:space-between;align-items:center;">
+            <h3 style="font-weight:600;font-size:20px;">${getText('your_decks')}</h3>
+            <div>
+              <button onclick="showImportModal()" class="btn" style="background:#e2e8f0;margin-right:8px;">${getText('import')}</button>
+              <button onclick="showCreateDeckModal()" class="btn btn-primary">${getText('new_deck')}</button>
+            </div>
+          </div>
+
+          ${decks.length ? decks.map(deck => `
+            <div onclick="openDeck('${deck.id}')" class="card" style="cursor:pointer;">
+              <div style="font-weight:600;font-size:19px;">${deck.name}</div>
+              <div style="color:#64748b;margin-top:4px;">${deck.cards ? deck.cards.length : 0} cards • ${getDeckDue(deck)} due</div>
+            </div>
+          `).join('') : `<div style="text-align:center;padding:80px 20px;color:#64748b;">${getText('no_decks')}<br><br>${getText('tap_new')}</div>`}
+        `;
+      }
+    }
+
+    function getTotalCards() { return decks.reduce((a,d)=>a+(d.cards?d.cards.length:0),0); }
+    function getDueToday() {
+      let c = 0;
+      decks.forEach(d => c += getDeckDue(d));
+      return c;
+    }
+
+    function getDeckDue(deck) {
+      const now = Date.now();
+      return deck.cards ? deck.cards.filter(c => {
+        if (c.section === 1) return true;
+        if (!c.lastReviewed) return true;
+        const daysPassed = (now - c.lastReviewed) / DAY_MS;
+        const interval = globalSettings.intervals[c.section-1] || 3;
+        return daysPassed >= interval;
+      }).length : 0;
+    }
+
+    function showCreateDeckModal() {
+      document.getElementById('create-deck-modal').style.display = 'flex';
+      document.getElementById('deck-title').value = '';
+      document.getElementById('deck-desc').value = '';
+      document.getElementById('new-per-day').value = globalSettings.newWordsPerDay;
+      document.getElementById('create-title').textContent = getText('create_new_deck');
+      document.getElementById('deck-title-label').textContent = getText('deck_title');
+      document.getElementById('deck-desc-label').textContent = getText('description_optional');
+      document.getElementById('new-per-day-label').textContent = getText('new_words_per_day');
+      document.getElementById('color-label').textContent = getText('color');
+      document.getElementById('create-btn').textContent = getText('create_deck_btn');
+      renderColorPicker();
+    }
+    function hideCreateDeckModal() { document.getElementById('create-deck-modal').style.display = 'none'; }
+
+    function renderColorPicker() {
+      const colors = ['#6d28d9','#a855f7','#ec4899','#ef4444','#f59e0b','#10b981','#14b8a6','#3b82f6'];
+      let html = '';
+      colors.forEach((c,i) => html += `<div class="color-dot" style="background:${c}" onclick="selectColor(this)" data-index="${i}"></div>`);
+      document.getElementById('color-picker').innerHTML = html;
+    }
+    function selectColor(el) {
+      document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('selected'));
+      el.classList.add('selected');
+    }
+
+    function saveNewDeck() {
+      const title = document.getElementById('deck-title').value.trim();
+      if (!title) return alert('Deck title is required');
+      decks.push({
+        id: generateId(),
+        name: title,
+        description: document.getElementById('deck-desc').value.trim(),
+        newPerDay: parseInt(document.getElementById('new-per-day').value) || globalSettings.newWordsPerDay,
+        cards: [],
+        color: document.querySelector('.color-dot.selected') ? document.querySelector('.color-dot.selected').style.background : '#6d28d9'
+      });
+      saveData();
+      hideCreateDeckModal();
+      render(0);
+    }
+
+    function openDeck(id) {
+      currentDeckId = id;
+      const deck = decks.find(d => d.id === id);
+      document.getElementById('deck-name-detail').innerHTML = `<span style="background:${deck.color};color:white;padding:4px 12px;border-radius:9999px;font-size:14px;">${deck.name}</span>`;
+      document.getElementById('deck-desc-detail').textContent = deck.description || 'No description';
+      document.getElementById('delete-deck-btn').textContent = getText('delete_deck');
+      document.getElementById('study-now-btn').innerHTML = getText('study_now_btn');
+      document.getElementById('half-year-btn').innerHTML = getText('half_year_btn');
+      document.getElementById('add-card-btn').innerHTML = getText('add_card');
+      document.getElementById('import-apkg-btn').innerHTML = getText('import_apkg');
+      document.getElementById('all-cards-title').textContent = getText('all_cards');
+
+      let statsHTML = '';
+      for (let i = 1; i <= globalSettings.numSections; i++) {
+        const count = deck.cards ? deck.cards.filter(c => c.section === i).length : 0;
+        let label = '';
+        if (i === 1) label = getText('section_new');
+        else if (i === globalSettings.numSections) label = getText('section_done');
+        else label = getText('section_review', globalSettings.intervals[i-1] || 0);
+        statsHTML += `<div class="section-pill"><div style="font-size:28px;font-weight:700;">${count}</div><div style="font-size:13px;">${label}</div></div>`;
+      }
+      document.getElementById('section-stats').innerHTML = statsHTML;
+
+      let listHTML = deck.cards.map(card => `
+        <div style="background:#f8fafc;border-radius:16px;padding:16px;margin-bottom:12px;position:relative;">
+          <div style="font-weight:600;">${card.front || 'No front'}</div>
+          <div style="color:#64748b;margin-top:4px;">${card.back || 'No back'}</div>
+          ${card.image ? `<img src="${card.image}" class="media-preview">` : ''}
+          ${card.media ? `<div style="margin-top:8px;"><audio controls style="width:100%;"><source src="${card.media}"></audio></div>` : ''}
+          <div style="position:absolute;top:12px;right:12px;display:flex;gap:8px;">
+            <button onclick="editCard('${card.id}');event.stopImmediatePropagation()" style="background:#e2e8f0;color:#64748b;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('edit')}</button>
+            <button onclick="deleteCard('${card.id}');event.stopImmediatePropagation()" style="background:#fee2e2;color:#ef4444;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('delete')}</button>
+          </div>
+        </div>
+      `).join('') || `<p style="color:#64748b;text-align:center;padding:40px;">No cards in this deck yet</p>`;
+      document.getElementById('card-list').innerHTML = listHTML;
+
+      document.getElementById('deck-detail-modal').style.display = 'flex';
+    }
+
+    function hideDeckDetailModal() { document.getElementById('deck-detail-modal').style.display = 'none'; }
+
+    function deleteCurrentDeck() {
+      if (!confirm(getText('delete_deck'))) return;
+      decks = decks.filter(d => d.id !== currentDeckId);
+      saveData();
+      hideDeckDetailModal();
+      render(0);
+    }
+
+    function editCard(cardId) {
+      const deck = decks.find(d => d.id === currentDeckId);
+      const card = deck.cards.find(c => c.id === cardId);
+      if (!card) return;
+      currentEditCardId = cardId;
+
+      document.getElementById('edit-front').value = card.front || '';
+      document.getElementById('edit-back').value = card.back || '';
+
+      editImage = card.image || null;
+      editMedia = card.media || null;
+
+      renderEditImagePreview();
+      renderEditMediaPreview();
+
+      document.getElementById('edit-card-title').textContent = getText('edit_card');
+      document.getElementById('image-label').textContent = getText('image');
+      document.getElementById('sound-label').textContent = getText('sound_video');
+      document.getElementById('delete-image-btn').textContent = getText('delete_btn');
+      document.getElementById('edit-record-btn').innerHTML = getText('live_record');
+      document.getElementById('upload-btn').textContent = getText('upload');
+      document.getElementById('delete-media-btn').textContent = getText('delete_btn');
+      document.getElementById('save-changes-btn').textContent = getText('save_changes');
+
+      document.getElementById('edit-card-modal').style.display = 'flex';
+    }
+
+    function renderEditImagePreview() {
+      const container = document.getElementById('edit-image-preview-container');
+      if (editImage) {
+        container.innerHTML = `<img src="${editImage}" class="media-preview" style="display:block;">`;
+      } else {
+        container.innerHTML = `<p style="color:#64748b;padding:20px;text-align:center;border:1px dashed #cbd5e1;border-radius:12px;">${getText('no_image')}</p>`;
+      }
+    }
+
+    function renderEditMediaPreview() {
+      const container = document.getElementById('edit-media-preview-container');
+      if (editMedia) {
+        if (editMedia.includes('audio')) {
+          container.innerHTML = `<audio controls style="width:100%;"><source src="${editMedia}"></audio>`;
+        } else if (editMedia.includes('video')) {
+          container.innerHTML = `<video controls style="width:100%;"><source src="${editMedia}"></video>`;
+        } else {
+          container.innerHTML = `<p style="color:#10b981;">Media attached</p>`;
+        }
+      } else {
+        container.innerHTML = `<p style="color:#64748b;padding:20px;text-align:center;border:1px dashed #cbd5e1;border-radius:12px;">${getText('no_sound')}</p>`;
+      }
+    }
+
+    function previewEditImage(input) {
+      const file = input.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          editImage = e.target.result;
+          renderEditImagePreview();
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function deleteEditImage() {
+      editImage = null;
+      renderEditImagePreview();
+    }
+
+    function previewEditMedia(input) {
+      const file = input.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          editMedia = e.target.result;
+          renderEditMediaPreview();
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    async function toggleEditRecording() {
+      const btn = document.getElementById('edit-record-btn');
+      if (isEditRecording) {
+        editMediaRecorder.stop();
+        isEditRecording = false;
+        btn.innerHTML = getText('live_record');
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        editMediaRecorder = new MediaRecorder(stream);
+        editAudioChunks = [];
+        editMediaRecorder.ondataavailable = e => editAudioChunks.push(e.data);
+        editMediaRecorder.onstop = () => {
+          const blob = new Blob(editAudioChunks, { type: 'audio/webm' });
+          const reader = new FileReader();
+          reader.onload = e => {
+            editMedia = e.target.result;
+            renderEditMediaPreview();
+            const audio = new Audio(editMedia);
+            audio.play().catch(() => {});
+          };
+          reader.readAsDataURL(blob);
+        };
+        editMediaRecorder.start();
+        isEditRecording = true;
+        btn.textContent = '⏹ Stop Recording';
+      } catch(e) { 
+        alert('Microphone permission required for live recording'); 
+      }
+    }
+
+    function deleteEditMedia() {
+      editMedia = null;
+      renderEditMediaPreview();
+    }
+
+    function hideEditCardModal() {
+      document.getElementById('edit-card-modal').style.display = 'none';
+      currentEditCardId = null;
+      editImage = null;
+      editMedia = null;
+    }
+
+    function saveEditedCard() {
+      const deck = decks.find(d => d.id === currentDeckId);
+      const card = deck.cards.find(c => c.id === currentEditCardId);
+      if (card) {
+        card.front = document.getElementById('edit-front').value.trim();
+        card.back = document.getElementById('edit-back').value.trim();
+        card.image = editImage;
+        card.media = editMedia;
+        saveData();
+      }
+      hideEditCardModal();
+      openDeck(currentDeckId);
+    }
+
+    function deleteCard(cardId) {
+      if (!confirm(getText('delete'))) return;
+      const deck = decks.find(d => d.id === currentDeckId);
+      deck.cards = deck.cards.filter(c => c.id !== cardId);
+      saveData();
+      openDeck(currentDeckId);
+    }
+
+    function showAddCardModal() {
+      document.getElementById('add-card-modal').style.display = 'flex';
+      document.getElementById('card-front').value = '';
+      document.getElementById('card-back').value = '';
+      currentImage = null;
+      currentMedia = null;
+
+      document.getElementById('add-card-title').textContent = getText('add_new_card');
+      document.getElementById('card-front').placeholder = getText('front_placeholder');
+      document.getElementById('card-back').placeholder = getText('back_placeholder');
+      document.getElementById('image-label-add').textContent = getText('image');
+      document.getElementById('sound-label-add').textContent = getText('sound_video');
+      document.getElementById('record-btn').innerHTML = getText('live_record');
+      document.getElementById('upload-btn-add').textContent = getText('upload');
+      document.getElementById('save-card-btn').textContent = getText('save_changes');
+    }
+    function hideAddCardModal() { document.getElementById('add-card-modal').style.display = 'none'; }
+
+    function previewImage(input) {
+      const file = input.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = e => currentImage = e.target.result;
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function previewMedia(input) {
+      const file = input.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = e => currentMedia = e.target.result;
+        reader.readAsDataURL(file);
+      }
+    }
+
+    async function toggleRecording() {
+      const btn = document.getElementById('record-btn');
+      if (isRecording) {
+        mediaRecorder.stop();
+        isRecording = false;
+        btn.innerHTML = getText('live_record');
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(audioChunks, { type: 'audio/webm' });
+          const reader = new FileReader();
+          reader.onload = e => { 
+            currentMedia = e.target.result; 
+            const audio = new Audio(currentMedia);
+            audio.play().catch(() => {});
+          };
+          reader.readAsDataURL(blob);
+        };
+        mediaRecorder.start();
+        isRecording = true;
+        btn.textContent = '⏹ Stop Recording';
+      } catch(e) { 
+        alert('Microphone permission required for live recording'); 
+      }
+    }
+
+    function saveCard() {
+      const front = document.getElementById('card-front').value.trim();
+      const back = document.getElementById('card-back').value.trim();
+      if (!front || !back) return alert('Front and back are required');
+
+      const deck = decks.find(d => d.id === currentDeckId);
+      deck.cards.push({
+        id: generateId(),
+        front: front,
+        back: back,
+        image: currentImage,
+        media: currentMedia,
+        section: 1,
+        lastReviewed: null
+      });
+      saveData();
+      hideAddCardModal();
+      openDeck(currentDeckId);
+    }
+
+    function startStudySession(mode) {
+      hideDeckDetailModal();
+      const deck = decks.find(d => d.id === currentDeckId);
+      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
+
+      let sessionCards = [];
+      if (mode === 'mature' && globalSettings.halfYearMatureReview) {
+        sessionCards = deck.cards.filter(c => c.section === globalSettings.numSections).sort(() => Math.random() - 0.5).slice(0, 15);
+        if (sessionCards.length === 0) return alert('No mastered cards for half-year review yet.');
+      } else {
+        sessionCards = deck.cards.filter(c => {
+          if (c.section === 1) return true;
+          if (!c.lastReviewed) return true;
+          const days = (Date.now() - c.lastReviewed) / DAY_MS;
+          return days >= (globalSettings.intervals[c.section-1] || 3);
+        });
+      }
+
+      if (sessionCards.length === 0) return alert('No cards are due right now.');
+
+      currentStudySession = { cards: sessionCards, index: 0, mode, deckId: currentDeckId };
+      loadCurrentCard();
+      document.getElementById('study-modal').style.display = 'flex';
+    }
+
+    function loadCurrentCard() {
+      const s = currentStudySession;
+      const card = s.cards[s.index];
+
+      document.getElementById('study-deck-name').textContent = decks.find(d => d.id === s.deckId).name;
+      document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
+
+      document.getElementById('front-text').innerHTML = card.front || '';
+      const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
+      const fAud = document.getElementById('front-audio'); fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) fAud.src = card.media;
+      const fVid = document.getElementById('front-video'); fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) fVid.src = card.media;
+
+      document.getElementById('back-text').innerHTML = card.back || '';
+      const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
+      const bAud = document.getElementById('back-audio'); bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) bAud.src = card.media;
+      const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
+
+      document.getElementById('flashcard').classList.remove('flipped');
+      document.getElementById('rating-buttons').style.display = 'grid';
+      document.getElementById('wrong-btn').innerHTML = getText('wrong_btn');
+      document.getElementById('correct-btn').innerHTML = getText('correct_btn');
+    }
+
+    function flipCard() {
+      document.getElementById('flashcard').classList.toggle('flipped');
+    }
+
+    function rateCard(correct) {
+      const s = currentStudySession;
+      const card = s.cards[s.index];
+      card.lastReviewed = Date.now();
+
+      if (s.mode === 'mature') {
+        if (!correct) card.section = globalSettings.wrongSection;
+      } else {
+        if (correct) {
+          card.section = Math.min(card.section + 1, globalSettings.numSections);
+        } else {
+          card.section = globalSettings.wrongSection;
+        }
+      }
+
+      if (s.index < s.cards.length - 1) {
+        s.index++;
+        loadCurrentCard();
+      } else {
+        alert('🎉 Study session completed!');
+        hideStudyModal();
+        render(0);
+      }
+      saveData();
+    }
+
+    function hideStudyModal() { document.getElementById('study-modal').style.display = 'none'; }
+
+    function showImportModal() {
+      document.getElementById('import-modal').style.display = 'flex';
+      document.getElementById('import-title').textContent = getText('import_title');
+      document.getElementById('import-desc').innerHTML = getText('import_desc');
+      document.getElementById('import-status').innerHTML = '';
+    }
+    function hideImportModal() { document.getElementById('import-modal').style.display = 'none'; }
+
+    async function handleImportFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const status = document.getElementById('import-status');
+      status.innerHTML = `<p>📦 Loading ${file.name}... (this may take a few seconds for large decks)</p>`;
+
+      await initSQL();
+
+      try {
+        const zip = await JSZip.loadAsync(file);
+
+        let collectionEntry = zip.file('collection.anki21') || zip.file('collection.anki2');
+        if (!collectionEntry) throw new Error('No collection database found');
+
+        const dbBuffer = await collectionEntry.async('arraybuffer');
+        const db = new SQL.Database(new Uint8Array(dbBuffer));
+
+        const mediaMap = {};
+
+        const mediaJsonFile = zip.file('media');
+        if (mediaJsonFile) {
+          const mediaJsonText = await mediaJsonFile.async('string');
+          const mediaFilenameMap = JSON.parse(mediaJsonText);
+
+          for (const [indexStr, realFilename] of Object.entries(mediaFilenameMap)) {
+            const entry = zip.file(indexStr);
+            if (entry) {
+              const data = await entry.async('base64');
+              const ext = (realFilename.split('.').pop() || '').toLowerCase();
+              let mime = 'application/octet-stream';
+              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
+              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
+              else if (['mp4','webm'].includes(ext)) mime = 'video/';
+              const dataUrl = `data:${mime}${ext};base64,${data}`;
+              mediaMap[indexStr] = dataUrl;
+              mediaMap[realFilename] = dataUrl;
+            }
+          }
+        }
+
+        if (Object.keys(mediaMap).length === 0) {
+          const mediaFiles = Object.keys(zip.files).filter(name => 
+            name.match(/^\d+$/) || name.match(/\.(jpg|png|gif|mp3|ogg|wav|mp4|webm)$/i)
+          );
+          for (const fname of mediaFiles) {
+            const entry = zip.file(fname);
+            if (entry) {
+              const data = await entry.async('base64');
+              const ext = (fname.split('.').pop() || '').toLowerCase();
+              let mime = 'application/octet-stream';
+              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
+              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
+              else if (['mp4','webm'].includes(ext)) mime = 'video/';
+              const dataUrl = `data:${mime}${ext};base64,${data}`;
+              mediaMap[fname] = dataUrl;
+            }
+          }
+        }
+
+        const notesStmt = db.prepare("SELECT flds FROM notes");
+        const importedCards = [];
+
+        while (notesStmt.step()) {
+          const row = notesStmt.get();
+          const fields = (row[0] || '').split('\x1f');
+          let front = fields[0] || 'No front';
+          let back = fields[1] || (fields.slice(1).join(' • ') || 'No back');
+
+          let cardImage = null;
+          let cardMedia = null;
+
+          Object.keys(mediaMap).forEach(key => {
+            const dataUrl = mediaMap[key];
+
+            const imgRegex = new RegExp(`<img[^>]*src=["']${key}["'][^>]*>`, 'gi');
+            if (imgRegex.test(front)) {
+              cardImage = dataUrl;
+              front = front.replace(imgRegex, '').trim();
+            }
+            if (imgRegex.test(back)) {
+              cardImage = dataUrl;
+              back = back.replace(imgRegex, '').trim();
+            }
+
+            const soundRegex = new RegExp(`\\[sound:${key}\\]`, 'gi');
+            if (soundRegex.test(front)) {
+              cardMedia = dataUrl;
+              front = front.replace(soundRegex, '').trim();
+            }
+            if (soundRegex.test(back)) {
+              cardMedia = dataUrl;
+              back = back.replace(soundRegex, '').trim();
+            }
+          });
+
+          importedCards.push({
+            id: generateId(),
+            front: front,
+            back: back,
+            image: cardImage,
+            media: cardMedia,
+            section: 1,
+            lastReviewed: null
+          });
+        }
+
+        notesStmt.free();
+
+        const deckName = file.name.replace(/\.(apkg|colpkg|ofc)$/i, '') || 'Imported Deck';
+        const newDeck = {
+          id: generateId(),
+          name: deckName,
+          description: `Imported from ${file.name} — ${importedCards.length} cards`,
+          newPerDay: globalSettings.newWordsPerDay,
+          cards: importedCards,
+          color: '#6d28d9'
+        };
+
+        decks.push(newDeck);
+        saveData();
+
+        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">${getText('success_import', importedCards.length)}</p>`;
+        
+        setTimeout(() => {
+          hideImportModal();
+          render(0);
+          if (newDeck.id) openDeck(newDeck.id);
+        }, 1800);
+
+      } catch(e) {
+        console.error(e);
+        status.innerHTML += `<p style="color:#ef4444;">${getText('import_failed')}</p>`;
+      }
+    }
+
+    function showSettingsModal() {
+      document.getElementById('settings-modal').style.display = 'flex';
+      document.getElementById('global-new-per-day').value = globalSettings.newWordsPerDay;
+      document.getElementById('num-sections').value = globalSettings.numSections;
+      document.getElementById('wrong-section').value = globalSettings.wrongSection;
+      document.getElementById('half-year-toggle').checked = globalSettings.halfYearMatureReview;
+      document.getElementById('language-select').value = currentLang;
+
+      document.getElementById('settings-title').textContent = getText('global_settings');
+      document.getElementById('global-new-label').textContent = getText('new_words_global');
+      document.getElementById('num-sections-label').textContent = getText('num_sections');
+      document.getElementById('wrong-section-label').textContent = getText('wrong_section_label');
+      document.getElementById('half-year-text').textContent = getText('enable_half_year');
+      document.getElementById('language-label').innerHTML = 'Interface Language / 界面语言';
+      document.getElementById('save-settings-btn').textContent = getText('save_settings');
+
+      const container = document.getElementById('intervals-container');
+      container.innerHTML = `<label style="display:block;margin-bottom:12px;">${getText('review_intervals')}</label>`;
+      for (let i = 0; i < globalSettings.numSections; i++) {
+        container.innerHTML += `
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+            <span style="width:140px;">Section ${i+1}</span>
+            <input type="number" value="${globalSettings.intervals[i] || 0}" class="interval-input" data-index="${i}" style="width:100px;">
+          </div>`;
+      }
+    }
+
+    function hideSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
+
+    function saveSettings() {
+      globalSettings.newWordsPerDay = parseInt(document.getElementById('global-new-per-day').value) || 20;
+      globalSettings.numSections = parseInt(document.getElementById('num-sections').value) || 5;
+      globalSettings.wrongSection = parseInt(document.getElementById('wrong-section').value) || 3;
+      globalSettings.halfYearMatureReview = document.getElementById('half-year-toggle').checked;
+
+      const inputs = document.querySelectorAll('.interval-input');
+      globalSettings.intervals = Array.from(inputs).map(inp => parseInt(inp.value) || 0);
+
+      currentLang = document.getElementById('language-select').value;
+      saveData();
+
+      hideSettingsModal();
+      updateNav();
+      render(0);
+      alert(currentLang === 'zh' ? '✅ 设置已保存' : '✅ Settings saved.');
+    }
+
+    function init() {
+      loadData();
+      updateNav();
+      if (decks.length === 0) {
+        decks.push({
+          id: generateId(),
+          name: "Demo Deck",
+          description: "Your first deck",
+          newPerDay: 20,
+          cards: []
+        });
+        saveData();
+      }
+      navigateTo(0);
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>
