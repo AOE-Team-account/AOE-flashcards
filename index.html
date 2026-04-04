@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
-  <!-- iOS Home Screen Settings -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="AOE flashcards">
@@ -114,7 +113,6 @@
   </div>
 
   <div id="main-content" class="container"></div>
-
   <!-- CREATE DECK MODAL -->
   <div id="create-deck-modal" class="modal" onclick="if(event.target.id==='create-deck-modal')hideCreateDeckModal()">
     <div class="modal-content" onclick="event.stopImmediatePropagation()">
@@ -245,7 +243,7 @@
     </div>
   </div>
 
-  <!-- IMPORT MODAL - Fixed for iPhone -->
+  <!-- IMPORT MODAL -->
   <div id="import-modal" class="modal" onclick="if(event.target.id==='import-modal')hideImportModal()">
     <div class="modal-content" onclick="event.stopImmediatePropagation()">
       <h2 id="import-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
@@ -958,15 +956,14 @@
 
     function hideStudyModal() { document.getElementById('study-modal').style.display = 'none'; }
 
-    // === IMPROVED IMPORT MODAL FUNCTIONS ===
-    function showImportModal() {
+   function showImportModal() {
       document.getElementById('import-modal').style.display = 'flex';
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
       document.getElementById('import-status').innerHTML = '';
       
       const fileInput = document.getElementById('import-file');
-      fileInput.value = '';
+      fileInput.value = '';   // clear previous selection
       
       const label = document.getElementById('import-file-label');
       if (label) label.textContent = currentLang === 'zh' ? '选择 .apkg 文件' : 'Select your .apkg / .colpkg / .ofc file';
@@ -975,10 +972,10 @@
     function hideImportModal() {
       document.getElementById('import-modal').style.display = 'none';
     }
-
     async function handleImportFile(input) {
       const file = input.files[0];
       if (!file) return;
+
       const status = document.getElementById('import-status');
       status.innerHTML = `<p>📦 Loading ${file.name}... (this may take a few seconds for large decks)</p>`;
 
@@ -1110,6 +1107,17 @@
         status.innerHTML += `<p style="color:#ef4444;">${getText('import_failed')}</p>`;
       }
     }
+
+    // Attach the event listener once when the page loads (this is the key fix for iOS)
+    window.addEventListener('load', () => {
+      const importFileInput = document.getElementById('import-file');
+      if (importFileInput) {
+        importFileInput.addEventListener('change', () => {
+          handleImportFile(importFileInput);
+        });
+      }
+      init();   // your original init
+    });
 
     function showSettingsModal() {
       document.getElementById('settings-modal').style.display = 'flex';
