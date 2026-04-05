@@ -295,7 +295,7 @@
 <script>
     let decks = [];
     let currentDeckId = null;
-    let currentStudySession = { cards: [], index: 0, mode: "normal", deckId: null };
+    let currentStudySession = { cards: [], index: 0, mode: "normal", deckId: null, newCount: 0 };
     let currentEditCardId = null;
 
     let editImage = null;
@@ -543,12 +543,11 @@
         const reviewDue = getReviewDueToday();
         const totalDue = newDue + reviewDue;
 
-        // Only show "Review Now!" button if there are due REVIEW words (section 2+)
         let reviewHTML = '';
         if (reviewDue > 0) {
           reviewHTML = `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">${reviewDue} review cards due • Review Now!</button>`;
         } else if (newDue > 0) {
-          reviewHTML = `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">${newDue} new words ready • Go to a deck to study them</div>`;
+          reviewHTML = `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">${newDue} new words ready • Open a deck to study them</div>`;
         } else {
           reviewHTML = `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">No cards due today 🎉</div>`;
         }
@@ -593,7 +592,6 @@
       }
     }
 
-    // Only activates when there are due review words (section 2+)
     function startGlobalReview() {
       let reviewCards = [];
       let targetDeckId = null;
@@ -622,10 +620,123 @@
         cards: reviewCards.sort(() => Math.random() - 0.5), 
         index: 0, 
         mode: "normal", 
-        deckId: targetDeckId 
+        deckId: targetDeckId,
+        newCount: 0
       };
       loadCurrentCard();
       document.getElementById('study-modal').style.display = 'flex';
+    }
+
+    function checkNewWordLimit() {
+      const limit = globalSettings.newWordsPerDay;
+      const newIntroduced = currentStudySession.newCount || 0;
+
+      if (currentStudySession.cards[currentStudySession.index] && 
+          currentStudySession.cards[currentStudySession.index].section === 1 && 
+          newIntroduced >= limit) {
+        
+        const msg = `You've reached your daily word limit of ${limit}!\n\nContinue anyway?`;
+        if (!confirm(msg)) {
+          hideStudyModal();
+          render(0);
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function loadCurrentCard() {
+      if (!checkNewWordLimit()) return;
+
+      const s = currentStudySession;
+      const card = s.cards[s.index];
+
+      document.getElementById('study-deck-name').textContent = decks.find(d => d.id === s.deckId).name;
+      document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
+
+      if (card.section === 1) {
+        s.newCount = (s.newCount || 0) + 1;
+      }
+
+      document.getElementById('front-text').innerHTML = card.front || '';
+      const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
+      const fAud = document.getElementById('front-audio'); fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) fAud.src = card.media;
+      const fVid = document.getElementById('front-video'); fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) fVid.src = card.media;
+
+      document.getElementById('back-text').innerHTML = card.back || '';
+      const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
+      const bAud = document.getElementById('back-audio'); bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) bAud.src = card.media;
+      const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
+
+      document.getElementById('flashcard').classList.remove('flipped');
+      document.getElementById('rating-buttons').style.display = 'grid';
+      document.getElementById('wrong-btn').innerHTML = getText('wrong_btn');
+      document.getElementById('correct-btn').innerHTML = getText('correct_btn');
+    }
+
+    function startStudySession(mode) {
+      hideDeckDetailModal();
+      const deck = decks.find(d => d.id === currentDeckId);
+      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
+
+      let sessionCards = [];
+      if (mode === 'mature' && globalSettings.halfYearMatureReview) {
+        sessionCards = deck.cards.filter(c => c.section === globalSettings.numSections).sort(() => Math.random() - 0.5).slice(0, 15);
+      } else {
+        sessionCards = deck.cards.filter(c => {
+          if (c.section === 1) return true;
+          if (!c.lastReviewed) return true;
+          const days = (Date.now() - c.lastReviewed) / DAY_MS;
+          return days >= (globalSettings.intervals[c.section-1] || 3);
+        });
+      }
+
+      if (sessionCards.length === 0) return alert('No cards are due right now.');
+
+      currentStudySession = { 
+        cards: sessionCards, 
+        index: 0, 
+        mode, 
+        deckId: currentDeckId,
+        newCount: 0
+      };
+      loadCurrentCard();
+      document.getElementById('study-modal').style.display = 'flex';
+    }
+
+    function flipCard() {
+      document.getElementById('flashcard').classList.toggle('flipped');
+    }
+
+    function rateCard(correct) {
+      const s = currentStudySession;
+      const card = s.cards[s.index];
+      card.lastReviewed = Date.now();
+
+      if (s.mode === 'mature') {
+        if (!correct) card.section = globalSettings.wrongSection;
+      } else {
+        if (correct) {
+          card.section = Math.min(card.section + 1, globalSettings.numSections);
+        } else {
+          card.section = globalSettings.wrongSection;
+        }
+      }
+
+      saveData();
+
+      if (s.index < s.cards.length - 1) {
+        s.index++;
+        loadCurrentCard();
+      } else {
+        alert('🎉 Study session completed!');
+        hideStudyModal();
+        render(0);
+      }
+    }
+
+    function hideStudyModal() { 
+      document.getElementById('study-modal').style.display = 'none'; 
     }
 
     function showCreateDeckModal() {
@@ -952,87 +1063,6 @@
       hideAddCardModal();
       openDeck(currentDeckId);
     }
-
-    function startStudySession(mode) {
-      hideDeckDetailModal();
-      const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
-
-      let sessionCards = [];
-      if (mode === 'mature' && globalSettings.halfYearMatureReview) {
-        sessionCards = deck.cards.filter(c => c.section === globalSettings.numSections).sort(() => Math.random() - 0.5).slice(0, 15);
-        if (sessionCards.length === 0) return alert('No mastered cards for half-year review yet.');
-      } else {
-        sessionCards = deck.cards.filter(c => {
-          if (c.section === 1) return true;
-          if (!c.lastReviewed) return true;
-          const days = (Date.now() - c.lastReviewed) / DAY_MS;
-          return days >= (globalSettings.intervals[c.section-1] || 3);
-        });
-      }
-
-      if (sessionCards.length === 0) return alert('No cards are due right now.');
-
-      currentStudySession = { cards: sessionCards, index: 0, mode, deckId: currentDeckId };
-      loadCurrentCard();
-      document.getElementById('study-modal').style.display = 'flex';
-    }
-
-    function loadCurrentCard() {
-      const s = currentStudySession;
-      const card = s.cards[s.index];
-
-      document.getElementById('study-deck-name').textContent = decks.find(d => d.id === s.deckId).name;
-      document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
-
-      document.getElementById('front-text').innerHTML = card.front || '';
-      const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
-      const fAud = document.getElementById('front-audio'); fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) fAud.src = card.media;
-      const fVid = document.getElementById('front-video'); fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) fVid.src = card.media;
-
-      document.getElementById('back-text').innerHTML = card.back || '';
-      const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
-      const bAud = document.getElementById('back-audio'); bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) bAud.src = card.media;
-      const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
-
-      document.getElementById('flashcard').classList.remove('flipped');
-      document.getElementById('rating-buttons').style.display = 'grid';
-      document.getElementById('wrong-btn').innerHTML = getText('wrong_btn');
-      document.getElementById('correct-btn').innerHTML = getText('correct_btn');
-    }
-
-    function flipCard() {
-      document.getElementById('flashcard').classList.toggle('flipped');
-    }
-
-    function rateCard(correct) {
-      const s = currentStudySession;
-      const card = s.cards[s.index];
-      card.lastReviewed = Date.now();
-
-      if (s.mode === 'mature') {
-        if (!correct) card.section = globalSettings.wrongSection;
-      } else {
-        if (correct) {
-          card.section = Math.min(card.section + 1, globalSettings.numSections);
-        } else {
-          card.section = globalSettings.wrongSection;
-        }
-      }
-
-      saveData();
-
-      if (s.index < s.cards.length - 1) {
-        s.index++;
-        loadCurrentCard();
-      } else {
-        alert('🎉 Study session completed!');
-        hideStudyModal();
-        render(0);
-      }
-    }
-
-    function hideStudyModal() { document.getElementById('study-modal').style.display = 'none'; }
 
     function showImportModal() {
       document.getElementById('import-modal').style.display = 'flex';
