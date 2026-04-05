@@ -381,7 +381,7 @@
         nav_settings: "⚙️ Settings"
       },
       zh: {
-        // zh translations unchanged from your file
+        // Your original zh translations (kept the same)
         welcome_back: "欢迎回来",
         cards_waiting: "今天有 {0} 张卡片等待复习。",
         total_cards: "总卡片",
@@ -456,16 +456,14 @@
 
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
 
-    // IndexedDB for decks
+    // IndexedDB
     function initDB() {
       if (dbPromise) return dbPromise;
       dbPromise = new Promise((resolve, reject) => {
         const request = indexedDB.open('AOEFlashcards', 2);
         request.onupgradeneeded = e => {
           const db = e.target.result;
-          if (!db.objectStoreNames.contains('decks')) {
-            db.createObjectStore('decks', { keyPath: 'id' });
-          }
+          if (!db.objectStoreNames.contains('decks')) db.createObjectStore('decks', { keyPath: 'id' });
         };
         request.onsuccess = e => resolve(e.target.result);
         request.onerror = e => reject(e.target.error);
@@ -533,8 +531,7 @@
       return deck.cards ? deck.cards.filter(c => {
         if (c.section === 1) return true;
         if (!c.lastReviewed) return true;
-        const dueTime = c.lastReviewed + getIntervalMs(c.section);
-        return now >= dueTime;
+        return now >= (c.lastReviewed + getIntervalMs(c.section));
       }).length : 0;
     }
 
@@ -544,20 +541,8 @@
       return c;
     }
 
-    function getTodayKey() {
-      const d = new Date();
-      return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
-    }
-
-    function getNewWordsStudiedToday(deck) {
-      const key = `newWords_${deck.id}_${getTodayKey()}`;
-      return parseInt(localStorage.getItem(key)) || 0;
-    }
-
-    function incrementNewWordsStudied(deck, count) {
-      const key = `newWords_${deck.id}_${getTodayKey()}`;
-      const current = getNewWordsStudiedToday(deck);
-      localStorage.setItem(key, current + count);
+    function getTotalCards() {
+      return decks.reduce((a, d) => a + (d.cards ? d.cards.length : 0), 0);
     }
 
     function updateNav() {
@@ -585,6 +570,8 @@
         let reviewHTML = '';
         if (totalDue > 0) {
           reviewHTML = `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">You have ${totalDue} words to review • Review Now!</button>`;
+        } else {
+          reviewHTML = `<div style="text-align:center;margin:16px 0;color:#64748b;">No more cards to review today</div>`;
         }
 
         main.innerHTML = `
@@ -626,8 +613,6 @@
         `;
       }
     }
-
-    function getTotalCards() { return decks.reduce((a,d)=>a+(d.cards?d.cards.length:0),0); }
 
     function startGlobalReview() {
       for (let deck of decks) {
@@ -684,6 +669,8 @@
     function openDeck(id) {
       currentDeckId = id;
       const deck = decks.find(d => d.id === id);
+      if (!deck) return;
+
       document.getElementById('deck-name-detail').innerHTML = `<span style="background:${deck.color};color:white;padding:4px 12px;border-radius:9999px;font-size:14px;">${deck.name}</span>`;
       document.getElementById('deck-desc-detail').textContent = deck.description || 'No description';
       document.getElementById('delete-deck-btn').textContent = getText('delete_deck');
@@ -701,7 +688,7 @@
       }
       document.getElementById('section-stats').innerHTML = statsHTML;
 
-      let listHTML = deck.cards.map(card => `
+      let listHTML = (deck.cards || []).map(card => `
         <div style="background:#f8fafc;border-radius:16px;padding:16px;margin-bottom:12px;position:relative;">
           <div style="font-weight:600;">${card.front || 'No front'}</div>
           <div style="color:#64748b;margin-top:4px;">${card.back || 'No back'}</div>
@@ -713,8 +700,8 @@
           </div>
         </div>
       `).join('') || `<p style="color:#64748b;text-align:center;padding:40px;">No cards in this deck yet</p>`;
-      document.getElementById('card-list').innerHTML = listHTML;
 
+      document.getElementById('card-list').innerHTML = listHTML;
       document.getElementById('deck-detail-modal').style.display = 'flex';
     }
 
@@ -960,7 +947,7 @@
     function startStudySession(mode) {
       hideDeckDetailModal();
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
+      if (!deck || !deck.cards || deck.cards.length === 0) return alert('No cards yet');
 
       let sessionCards = [];
       if (mode === 'mature' && globalSettings.halfYearMatureReview) {
@@ -970,8 +957,7 @@
         sessionCards = deck.cards.filter(c => {
           if (c.section === 1) return true;
           if (!c.lastReviewed) return true;
-          const dueTime = c.lastReviewed + getIntervalMs(c.section);
-          return Date.now() >= dueTime;
+          return Date.now() >= (c.lastReviewed + getIntervalMs(c.section));
         });
       }
 
@@ -990,12 +976,12 @@
       document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
 
       document.getElementById('front-text').innerHTML = card.front || '';
-      const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
+      const fImg = document.getElementById('front-image'); fImg.style.display = !!card.image; if (card.image) fImg.src = card.image;
       const fAud = document.getElementById('front-audio'); fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) fAud.src = card.media;
       const fVid = document.getElementById('front-video'); fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) fVid.src = card.media;
 
       document.getElementById('back-text').innerHTML = card.back || '';
-      const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
+      const bImg = document.getElementById('back-image'); bImg.style.display = !!card.image; if (card.image) bImg.src = card.image;
       const bAud = document.getElementById('back-audio'); bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) bAud.src = card.media;
       const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
 
@@ -1030,7 +1016,7 @@
       } else {
         alert('🎉 Study session completed!');
         hideStudyModal();
-        render(0);
+        render(0);   // This forces refresh of home screen
       }
       saveData();
     }
@@ -1190,7 +1176,7 @@
         setTimeout(() => {
           hideImportModal();
           render(0);
-          openDeck(newDeck.id);
+          if (newDeck.id) openDeck(newDeck.id);
         }, 1500);
 
       } catch(e) {
