@@ -447,7 +447,6 @@
     }
 
     const DAY_MS = 86400000;
-
     let SQL = null;
 
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
@@ -477,7 +476,6 @@
       return decks.reduce((a, d) => a + (d.cards ? d.cards.length : 0), 0);
     }
 
-    // === NEW FUNCTIONS FOR SEPARATING NEW & REVIEW ===
     function getNewDue(deck) {
       return deck.cards ? deck.cards.filter(c => c.section === 1).length : 0;
     }
@@ -544,11 +542,16 @@
         const newDue = getNewDueToday();
         const reviewDue = getReviewDueToday();
         const totalDue = newDue + reviewDue;
-        const reviewed = getReviewedCount();
 
-        let reviewHTML = totalDue > 0 
-          ? `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">${totalDue} cards due today • Review Now!</button>`
-          : `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">No more cards to review today 🎉</div>`;
+        // Only show "Review Now!" button if there are due REVIEW words (section 2+)
+        let reviewHTML = '';
+        if (reviewDue > 0) {
+          reviewHTML = `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">${reviewDue} review cards due • Review Now!</button>`;
+        } else if (newDue > 0) {
+          reviewHTML = `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">${newDue} new words ready • Go to a deck to study them</div>`;
+        } else {
+          reviewHTML = `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">No cards due today 🎉</div>`;
+        }
 
         main.innerHTML = `
           <div class="card" style="background: linear-gradient(135deg,#6d28d9,#a855f7);color:white;padding:32px 24px;border-radius:28px;">
@@ -590,6 +593,7 @@
       }
     }
 
+    // Only activates when there are due review words (section 2+)
     function startGlobalReview() {
       let reviewCards = [];
       let targetDeckId = null;
@@ -609,13 +613,13 @@
       }
 
       if (reviewCards.length === 0) {
-        alert("No review cards due today.\n\nYou can add new cards or check individual decks.");
+        alert("No review cards are due today.");
         return;
       }
 
       currentDeckId = targetDeckId;
       currentStudySession = { 
-        cards: reviewCards, 
+        cards: reviewCards.sort(() => Math.random() - 0.5), 
         index: 0, 
         mode: "normal", 
         deckId: targetDeckId 
