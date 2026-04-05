@@ -313,7 +313,8 @@
     let globalSettings = {
       newWordsPerDay: 20,
       numSections: 5,
-      intervals: [0, 3, 7, 30, 365],
+      intervals: [0, 1, 7, 30, 365],
+      intervalUnits: ['days', 'days', 'days', 'days', 'days'],
       wrongSection: 3,
       halfYearMatureReview: true
     };
@@ -361,7 +362,7 @@
         global_settings: "Global Settings",
         new_words_global: "New Words Per Day (global default)",
         num_sections: "Number of Review Sections",
-        review_intervals: "Review Intervals (days) for each section",
+        review_intervals: "Review Intervals",
         wrong_section_label: "Wrong answer always goes to section",
         enable_half_year: "Enable half-year mature review from section 5",
         save_settings: "Save Settings",
@@ -373,13 +374,14 @@
         wrong_btn: "✕ Wrong",
         correct_btn: "✓ Correct",
         section_new: "New Words",
-        section_review: "Review ({0} days)",
+        section_review: "Review",
         section_done: "Done! (Yearly)",
         nav_home: "🏠 Home",
         nav_create: "✚ Create",
         nav_settings: "⚙️ Settings"
       },
       zh: {
+        // zh translations unchanged from your file
         welcome_back: "欢迎回来",
         cards_waiting: "今天有 {0} 张卡片等待复习。",
         total_cards: "总卡片",
@@ -419,7 +421,7 @@
         global_settings: "全局设置",
         new_words_global: "每日新词数量（全局默认）",
         num_sections: "复习区间数量",
-        review_intervals: "每个区间的复习间隔（天）",
+        review_intervals: "每个区间的复习间隔",
         wrong_section_label: "答错总是进入区间",
         enable_half_year: "启用第5区间半年成熟复习",
         save_settings: "保存设置",
@@ -431,7 +433,7 @@
         wrong_btn: "✕ 错误",
         correct_btn: "✓ 正确",
         section_new: "新词",
-        section_review: "复习 ({0} 天)",
+        section_review: "复习",
         section_done: "已完成！(每年)",
         nav_home: "🏠 首页",
         nav_create: "✚ 创建",
@@ -446,16 +448,19 @@
     }
 
     const DAY_MS = 86400000;
+    const HOUR_MS = 3600000;
+    const MINUTE_MS = 60000;
+
     let SQL = null;
     let dbPromise = null;
 
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
 
-    // IndexedDB setup
+    // IndexedDB for decks
     function initDB() {
       if (dbPromise) return dbPromise;
       dbPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open('AOEFlashcards', 1);
+        const request = indexedDB.open('AOEFlashcards', 2);
         request.onupgradeneeded = e => {
           const db = e.target.result;
           if (!db.objectStoreNames.contains('decks')) {
@@ -515,6 +520,46 @@
       SQL = await initSqlJs(config);
     }
 
+    function getIntervalMs(section) {
+      const value = globalSettings.intervals[section - 1] || 0;
+      const unit = globalSettings.intervalUnits[section - 1] || 'days';
+      if (unit === 'hours') return value * HOUR_MS;
+      if (unit === 'minutes') return value * MINUTE_MS;
+      return value * DAY_MS;
+    }
+
+    function getDeckDue(deck) {
+      const now = Date.now();
+      return deck.cards ? deck.cards.filter(c => {
+        if (c.section === 1) return true;
+        if (!c.lastReviewed) return true;
+        const dueTime = c.lastReviewed + getIntervalMs(c.section);
+        return now >= dueTime;
+      }).length : 0;
+    }
+
+    function getDueToday() {
+      let c = 0;
+      decks.forEach(d => c += getDeckDue(d));
+      return c;
+    }
+
+    function getTodayKey() {
+      const d = new Date();
+      return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+    }
+
+    function getNewWordsStudiedToday(deck) {
+      const key = `newWords_${deck.id}_${getTodayKey()}`;
+      return parseInt(localStorage.getItem(key)) || 0;
+    }
+
+    function incrementNewWordsStudied(deck, count) {
+      const key = `newWords_${deck.id}_${getTodayKey()}`;
+      const current = getNewWordsStudiedToday(deck);
+      localStorage.setItem(key, current + count);
+    }
+
     function updateNav() {
       const container = document.getElementById('nav-container');
       container.innerHTML = `
@@ -536,17 +581,23 @@
     function render(tab) {
       const main = document.getElementById('main-content');
       if (tab === 0) {
+        const totalDue = getDueToday();
+        let reviewHTML = '';
+        if (totalDue > 0) {
+          reviewHTML = `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">You have ${totalDue} words to review • Review Now!</button>`;
+        }
+
         main.innerHTML = `
           <div class="card" style="background: linear-gradient(135deg,#6d28d9,#a855f7);color:white;padding:32px 24px;border-radius:28px;">
             <h2 style="font-size:28px;font-weight:700;">${getText('welcome_back')}</h2>
-            <p style="margin-top:8px;opacity:0.9;">${getText('cards_waiting', getDueToday())}</p>
+            <p style="margin-top:8px;opacity:0.9;">${getText('cards_waiting', totalDue)}</p>
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:24px;">
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
                 <div style="font-size:34px;font-weight:700;">${getTotalCards()}</div>
                 <div style="font-size:14px;">${getText('total_cards')}</div>
               </div>
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
-                <div style="font-size:34px;font-weight:700;">${getDueToday()}</div>
+                <div style="font-size:34px;font-weight:700;">${totalDue}</div>
                 <div style="font-size:14px;">${getText('due_today')}</div>
               </div>
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
@@ -555,6 +606,8 @@
               </div>
             </div>
           </div>
+
+          ${reviewHTML}
 
           <div style="margin:32px 0 16px;display:flex;justify-content:space-between;align-items:center;">
             <h3 style="font-weight:600;font-size:20px;">${getText('your_decks')}</h3>
@@ -575,21 +628,15 @@
     }
 
     function getTotalCards() { return decks.reduce((a,d)=>a+(d.cards?d.cards.length:0),0); }
-    function getDueToday() {
-      let c = 0;
-      decks.forEach(d => c += getDeckDue(d));
-      return c;
-    }
 
-    function getDeckDue(deck) {
-      const now = Date.now();
-      return deck.cards ? deck.cards.filter(c => {
-        if (c.section === 1) return true;
-        if (!c.lastReviewed) return true;
-        const daysPassed = (now - c.lastReviewed) / DAY_MS;
-        const interval = globalSettings.intervals[c.section-1] || 3;
-        return daysPassed >= interval;
-      }).length : 0;
+    function startGlobalReview() {
+      for (let deck of decks) {
+        if (getDeckDue(deck) > 0) {
+          currentDeckId = deck.id;
+          startStudySession('normal');
+          return;
+        }
+      }
     }
 
     function showCreateDeckModal() {
@@ -649,10 +696,7 @@
       let statsHTML = '';
       for (let i = 1; i <= globalSettings.numSections; i++) {
         const count = deck.cards ? deck.cards.filter(c => c.section === i).length : 0;
-        let label = '';
-        if (i === 1) label = getText('section_new');
-        else if (i === globalSettings.numSections) label = getText('section_done');
-        else label = getText('section_review', globalSettings.intervals[i-1] || 0);
+        let label = i === 1 ? getText('section_new') : (i === globalSettings.numSections ? getText('section_done') : getText('section_review'));
         statsHTML += `<div class="section-pill"><div style="font-size:28px;font-weight:700;">${count}</div><div style="font-size:13px;">${label}</div></div>`;
       }
       document.getElementById('section-stats').innerHTML = statsHTML;
@@ -926,8 +970,8 @@
         sessionCards = deck.cards.filter(c => {
           if (c.section === 1) return true;
           if (!c.lastReviewed) return true;
-          const days = (Date.now() - c.lastReviewed) / DAY_MS;
-          return days >= (globalSettings.intervals[c.section-1] || 3);
+          const dueTime = c.lastReviewed + getIntervalMs(c.section);
+          return Date.now() >= dueTime;
         });
       }
 
@@ -1010,7 +1054,6 @@
       document.getElementById('import-modal').style.display = 'none';
     }
 
-    // Main import function with IndexedDB save
     async function handleImportFile(input) {
       const file = input.files[0];
       if (!file) return;
@@ -1140,7 +1183,7 @@
         };
 
         decks.push(newDeck);
-        await saveData();   // Saves to IndexedDB
+        await saveData();
 
         status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ ${getText('success_import', importedCards.length)}</p>`;
         
@@ -1174,11 +1217,18 @@
 
       const container = document.getElementById('intervals-container');
       container.innerHTML = `<label style="display:block;margin-bottom:12px;">${getText('review_intervals')}</label>`;
+
       for (let i = 0; i < globalSettings.numSections; i++) {
+        const unit = globalSettings.intervalUnits[i] || 'days';
         container.innerHTML += `
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
             <span style="width:140px;">Section ${i+1}</span>
-            <input type="number" value="${globalSettings.intervals[i] || 0}" class="interval-input" data-index="${i}" style="width:100px;">
+            <input type="number" value="${globalSettings.intervals[i] || 0}" class="interval-input" data-index="${i}" style="width:80px;">
+            <select class="interval-unit" data-index="${i}" style="padding:8px;border-radius:8px;">
+              <option value="minutes" ${unit==='minutes'?'selected':''}>Minutes</option>
+              <option value="hours" ${unit==='hours'?'selected':''}>Hours</option>
+              <option value="days" ${unit==='days'?'selected':''}>Days</option>
+            </select>
           </div>`;
       }
     }
@@ -1192,7 +1242,10 @@
       globalSettings.halfYearMatureReview = document.getElementById('half-year-toggle').checked;
 
       const inputs = document.querySelectorAll('.interval-input');
+      const units = document.querySelectorAll('.interval-unit');
+
       globalSettings.intervals = Array.from(inputs).map(inp => parseInt(inp.value) || 0);
+      globalSettings.intervalUnits = Array.from(units).map(sel => sel.value);
 
       currentLang = document.getElementById('language-select').value;
       saveSettingsData();
@@ -1219,7 +1272,6 @@
       navigateTo(0);
     }
 
-    // Attach import listener for reliable iOS behavior
     window.addEventListener('load', () => {
       const importFileInput = document.getElementById('import-file');
       if (importFileInput) {
