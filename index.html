@@ -291,8 +291,7 @@
       <button onclick="saveSettings()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;" id="save-settings-btn"></button>
     </div>
   </div>
-
-  <script>
+<script>
     let decks = [];
     let currentDeckId = null;
     let currentStudySession = { cards: [], index: 0, mode: "normal", deckId: null };
@@ -314,13 +313,11 @@
       newWordsPerDay: 20,
       numSections: 5,
       intervals: [0, 1, 7, 30, 365],
-      intervalUnits: ['days', 'days', 'days', 'days', 'days'],
       wrongSection: 3,
       halfYearMatureReview: true
     };
 
     let currentLang = 'en';
-
     const translations = {
       en: {
         welcome_back: "Welcome back",
@@ -362,26 +359,26 @@
         global_settings: "Global Settings",
         new_words_global: "New Words Per Day (global default)",
         num_sections: "Number of Review Sections",
-        review_intervals: "Review Intervals",
+        review_intervals: "Review Intervals (days) for each section",
         wrong_section_label: "Wrong answer always goes to section",
         enable_half_year: "Enable half-year mature review from section 5",
         save_settings: "Save Settings",
         import_title: "Import Anki Deck (.apkg)",
         import_desc: "Select your .apkg file — real notes, fields, images & audio will be imported.",
         success_import: "Successfully imported {0} cards with clean text + real images & audio!",
+        import_failed: 'Import failed.<br><br>Please export from Anki with <strong>“Support older Anki versions”</strong> checked.',
         study_now_btn: "▶️ Study Now",
         half_year_btn: "🌍 Half-Year Mature Review",
         wrong_btn: "✕ Wrong",
         correct_btn: "✓ Correct",
         section_new: "New Words",
-        section_review: "Review",
+        section_review: "Review ({0} days)",
         section_done: "Done! (Yearly)",
         nav_home: "🏠 Home",
         nav_create: "✚ Create",
         nav_settings: "⚙️ Settings"
       },
       zh: {
-        // Your original zh translations (kept the same)
         welcome_back: "欢迎回来",
         cards_waiting: "今天有 {0} 张卡片等待复习。",
         total_cards: "总卡片",
@@ -421,19 +418,20 @@
         global_settings: "全局设置",
         new_words_global: "每日新词数量（全局默认）",
         num_sections: "复习区间数量",
-        review_intervals: "每个区间的复习间隔",
+        review_intervals: "每个区间的复习间隔（天）",
         wrong_section_label: "答错总是进入区间",
         enable_half_year: "启用第5区间半年成熟复习",
         save_settings: "保存设置",
         import_title: "导入 Anki 牌组 (.apkg)",
         import_desc: "选择您的 .apkg 文件 — 将导入真实笔记、字段、图片和音频。",
         success_import: "成功导入 {0} 张卡片，文本干净且带有真实图片和音频！",
+        import_failed: '导入失败。<br><br>请在 Anki 中勾选 <strong>“支持旧版 Anki”</strong> 后导出。',
         study_now_btn: "▶️ 开始学习",
         half_year_btn: "🌍 半年成熟复习",
         wrong_btn: "✕ 错误",
         correct_btn: "✓ 正确",
         section_new: "新词",
-        section_review: "复习",
+        section_review: "复习 ({0} 天)",
         section_done: "已完成！(每年)",
         nav_home: "🏠 首页",
         nav_create: "✚ 创建",
@@ -448,69 +446,10 @@
     }
 
     const DAY_MS = 86400000;
-    const HOUR_MS = 3600000;
-    const MINUTE_MS = 60000;
 
     let SQL = null;
-    let dbPromise = null;
 
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
-
-    // IndexedDB
-    function initDB() {
-      if (dbPromise) return dbPromise;
-      dbPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open('AOEFlashcards', 2);
-        request.onupgradeneeded = e => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains('decks')) db.createObjectStore('decks', { keyPath: 'id' });
-        };
-        request.onsuccess = e => resolve(e.target.result);
-        request.onerror = e => reject(e.target.error);
-      });
-      return dbPromise;
-    }
-
-    async function loadDecks() {
-      const db = await initDB();
-      return new Promise(resolve => {
-        const tx = db.transaction('decks', 'readonly');
-        const store = tx.objectStore('decks');
-        const req = store.getAll();
-        req.onsuccess = () => resolve(req.result || []);
-      });
-    }
-
-    async function saveDecks() {
-      const db = await initDB();
-      const tx = db.transaction('decks', 'readwrite');
-      const store = tx.objectStore('decks');
-      store.clear();
-      decks.forEach(deck => store.put(deck));
-      return new Promise(resolve => tx.oncomplete = resolve);
-    }
-
-    function loadSettings() {
-      const saved = localStorage.getItem('aoe_settings');
-      const savedLang = localStorage.getItem('aoe_lang');
-      if (saved) globalSettings = JSON.parse(saved);
-      if (savedLang) currentLang = savedLang;
-    }
-
-    function saveSettingsData() {
-      localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
-      localStorage.setItem('aoe_lang', currentLang);
-    }
-
-    async function loadData() {
-      loadSettings();
-      decks = await loadDecks();
-    }
-
-    async function saveData() {
-      await saveDecks();
-      saveSettingsData();
-    }
 
     async function initSQL() {
       if (SQL) return;
@@ -518,12 +457,23 @@
       SQL = await initSqlJs(config);
     }
 
-    function getIntervalMs(section) {
-      const value = globalSettings.intervals[section - 1] || 0;
-      const unit = globalSettings.intervalUnits[section - 1] || 'days';
-      if (unit === 'hours') return value * HOUR_MS;
-      if (unit === 'minutes') return value * MINUTE_MS;
-      return value * DAY_MS;
+    function loadData() {
+      const savedDecks = localStorage.getItem('aoe_decks');
+      const savedSettings = localStorage.getItem('aoe_settings');
+      const savedLang = localStorage.getItem('aoe_lang');
+      if (savedDecks) decks = JSON.parse(savedDecks);
+      if (savedSettings) globalSettings = JSON.parse(savedSettings);
+      if (savedLang) currentLang = savedLang;
+    }
+
+    function saveData() {
+      localStorage.setItem('aoe_decks', JSON.stringify(decks));
+      localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
+      localStorage.setItem('aoe_lang', currentLang);
+    }
+
+    function getTotalCards() {
+      return decks.reduce((a, d) => a + (d.cards ? d.cards.length : 0), 0);
     }
 
     function getDeckDue(deck) {
@@ -531,18 +481,24 @@
       return deck.cards ? deck.cards.filter(c => {
         if (c.section === 1) return true;
         if (!c.lastReviewed) return true;
-        return now >= (c.lastReviewed + getIntervalMs(c.section));
+        const daysPassed = (now - c.lastReviewed) / DAY_MS;
+        const interval = globalSettings.intervals[c.section - 1] || 1;
+        return daysPassed >= interval;
       }).length : 0;
     }
 
     function getDueToday() {
-      let c = 0;
-      decks.forEach(d => c += getDeckDue(d));
-      return c;
+      let count = 0;
+      decks.forEach(d => count += getDeckDue(d));
+      return count;
     }
 
-    function getTotalCards() {
-      return decks.reduce((a, d) => a + (d.cards ? d.cards.length : 0), 0);
+    function getReviewedCount() {
+      let count = 0;
+      decks.forEach(d => {
+        if (d.cards) count += d.cards.filter(c => c.lastReviewed != null).length;
+      });
+      return count;
     }
 
     function updateNav() {
@@ -556,8 +512,7 @@
 
     function navigateTo(tab) {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-      const activeBtn = document.getElementById(`nav-${tab}`);
-      if (activeBtn) activeBtn.classList.add('active');
+      document.getElementById(`nav-${tab}`).classList.add('active');
       if (tab === 4) showSettingsModal();
       else if (tab === 1) showCreateDeckModal();
       else render(tab);
@@ -566,29 +521,28 @@
     function render(tab) {
       const main = document.getElementById('main-content');
       if (tab === 0) {
-        const totalDue = getDueToday();
-        let reviewHTML = '';
-        if (totalDue > 0) {
-          reviewHTML = `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">You have ${totalDue} words to review • Review Now!</button>`;
-        } else {
-          reviewHTML = `<div style="text-align:center;margin:16px 0;color:#64748b;">No more cards to review today</div>`;
-        }
+        const due = getDueToday();
+        const reviewed = getReviewedCount();
+
+        let reviewHTML = due > 0 
+          ? `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">You have ${due} words to review • Review Now!</button>`
+          : `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">No more cards to review today 🎉</div>`;
 
         main.innerHTML = `
           <div class="card" style="background: linear-gradient(135deg,#6d28d9,#a855f7);color:white;padding:32px 24px;border-radius:28px;">
             <h2 style="font-size:28px;font-weight:700;">${getText('welcome_back')}</h2>
-            <p style="margin-top:8px;opacity:0.9;">${getText('cards_waiting', totalDue)}</p>
+            <p style="margin-top:8px;opacity:0.9;">${getText('cards_waiting', due)}</p>
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:24px;">
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
                 <div style="font-size:34px;font-weight:700;">${getTotalCards()}</div>
                 <div style="font-size:14px;">${getText('total_cards')}</div>
               </div>
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
-                <div style="font-size:34px;font-weight:700;">${totalDue}</div>
+                <div style="font-size:34px;font-weight:700;">${due}</div>
                 <div style="font-size:14px;">${getText('due_today')}</div>
               </div>
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
-                <div style="font-size:34px;font-weight:700;">0</div>
+                <div style="font-size:34px;font-weight:700;">${reviewed}</div>
                 <div style="font-size:14px;">${getText('reviewed')}</div>
               </div>
             </div>
@@ -623,7 +577,6 @@
         }
       }
     }
-
     function showCreateDeckModal() {
       document.getElementById('create-deck-modal').style.display = 'flex';
       document.getElementById('deck-title').value = '';
@@ -669,8 +622,6 @@
     function openDeck(id) {
       currentDeckId = id;
       const deck = decks.find(d => d.id === id);
-      if (!deck) return;
-
       document.getElementById('deck-name-detail').innerHTML = `<span style="background:${deck.color};color:white;padding:4px 12px;border-radius:9999px;font-size:14px;">${deck.name}</span>`;
       document.getElementById('deck-desc-detail').textContent = deck.description || 'No description';
       document.getElementById('delete-deck-btn').textContent = getText('delete_deck');
@@ -683,12 +634,15 @@
       let statsHTML = '';
       for (let i = 1; i <= globalSettings.numSections; i++) {
         const count = deck.cards ? deck.cards.filter(c => c.section === i).length : 0;
-        let label = i === 1 ? getText('section_new') : (i === globalSettings.numSections ? getText('section_done') : getText('section_review'));
+        let label = '';
+        if (i === 1) label = getText('section_new');
+        else if (i === globalSettings.numSections) label = getText('section_done');
+        else label = getText('section_review', globalSettings.intervals[i-1] || 0);
         statsHTML += `<div class="section-pill"><div style="font-size:28px;font-weight:700;">${count}</div><div style="font-size:13px;">${label}</div></div>`;
       }
       document.getElementById('section-stats').innerHTML = statsHTML;
 
-      let listHTML = (deck.cards || []).map(card => `
+      let listHTML = deck.cards.map(card => `
         <div style="background:#f8fafc;border-radius:16px;padding:16px;margin-bottom:12px;position:relative;">
           <div style="font-weight:600;">${card.front || 'No front'}</div>
           <div style="color:#64748b;margin-top:4px;">${card.back || 'No back'}</div>
@@ -700,8 +654,8 @@
           </div>
         </div>
       `).join('') || `<p style="color:#64748b;text-align:center;padding:40px;">No cards in this deck yet</p>`;
-
       document.getElementById('card-list').innerHTML = listHTML;
+
       document.getElementById('deck-detail-modal').style.display = 'flex';
     }
 
@@ -814,6 +768,8 @@
           reader.onload = e => {
             editMedia = e.target.result;
             renderEditMediaPreview();
+            const audio = new Audio(editMedia);
+            audio.play().catch(() => {});
           };
           reader.readAsDataURL(blob);
         };
@@ -913,6 +869,8 @@
           const reader = new FileReader();
           reader.onload = e => { 
             currentMedia = e.target.result; 
+            const audio = new Audio(currentMedia);
+            audio.play().catch(() => {});
           };
           reader.readAsDataURL(blob);
         };
@@ -947,7 +905,7 @@
     function startStudySession(mode) {
       hideDeckDetailModal();
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck || !deck.cards || deck.cards.length === 0) return alert('No cards yet');
+      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
 
       let sessionCards = [];
       if (mode === 'mature' && globalSettings.halfYearMatureReview) {
@@ -957,7 +915,8 @@
         sessionCards = deck.cards.filter(c => {
           if (c.section === 1) return true;
           if (!c.lastReviewed) return true;
-          return Date.now() >= (c.lastReviewed + getIntervalMs(c.section));
+          const days = (Date.now() - c.lastReviewed) / DAY_MS;
+          return days >= (globalSettings.intervals[c.section-1] || 3);
         });
       }
 
@@ -976,12 +935,12 @@
       document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
 
       document.getElementById('front-text').innerHTML = card.front || '';
-      const fImg = document.getElementById('front-image'); fImg.style.display = !!card.image; if (card.image) fImg.src = card.image;
+      const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
       const fAud = document.getElementById('front-audio'); fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) fAud.src = card.media;
       const fVid = document.getElementById('front-video'); fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) fVid.src = card.media;
 
       document.getElementById('back-text').innerHTML = card.back || '';
-      const bImg = document.getElementById('back-image'); bImg.style.display = !!card.image; if (card.image) bImg.src = card.image;
+      const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
       const bAud = document.getElementById('back-audio'); bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) bAud.src = card.media;
       const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
 
@@ -1010,20 +969,21 @@
         }
       }
 
+      saveData();
+
       if (s.index < s.cards.length - 1) {
         s.index++;
         loadCurrentCard();
       } else {
         alert('🎉 Study session completed!');
         hideStudyModal();
-        render(0);   // This forces refresh of home screen
+        render(0);   // Refresh home with updated Reviewed count
       }
-      saveData();
     }
 
     function hideStudyModal() { document.getElementById('study-modal').style.display = 'none'; }
 
-    function showImportModal() {
+   function showImportModal() {
       document.getElementById('import-modal').style.display = 'flex';
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
@@ -1040,6 +1000,7 @@
       document.getElementById('import-modal').style.display = 'none';
     }
 
+    // FIXED handleImportFile - properly handles modern Anki .apkg with collection.anki21
     async function handleImportFile(input) {
       const file = input.files[0];
       if (!file) return;
@@ -1052,20 +1013,27 @@
       try {
         const zip = await JSZip.loadAsync(file);
 
+        // Prefer collection.anki21 (real data in modern exports), fallback to anki2
         let collectionEntry = zip.file('collection.anki21') || zip.file('collection.anki2');
-        if (!collectionEntry) throw new Error('No collection database found');
+        if (!collectionEntry) throw new Error('No collection database found in the file.');
 
         const dbBuffer = await collectionEntry.async('arraybuffer');
         const db = new SQL.Database(new Uint8Array(dbBuffer));
 
+        // Quick check to avoid dummy database
         const testStmt = db.prepare("SELECT flds FROM notes LIMIT 1");
         let isDummy = false;
         if (testStmt.step()) {
           const testFields = (testStmt.get()[0] || '').split('\x1f');
-          if (testFields[0] && testFields[0].includes("Please update to the latest Anki version")) isDummy = true;
+          if (testFields[0] && testFields[0].includes("Please update to the latest Anki version")) {
+            isDummy = true;
+          }
         }
         testStmt.free();
-        if (isDummy) throw new Error('Dummy database detected. Please re-export from Anki with "Support older Anki versions" checked.');
+
+        if (isDummy) {
+          throw new Error('This appears to be a dummy database. Please re-export from Anki with "Support older Anki versions" checked.');
+        }
 
         const mediaMap = {};
 
@@ -1169,9 +1137,9 @@
         };
 
         decks.push(newDeck);
-        await saveData();
+        saveData();
 
-        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ ${getText('success_import', importedCards.length)}</p>`;
+        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
         
         setTimeout(() => {
           hideImportModal();
@@ -1180,10 +1148,17 @@
         }, 1500);
 
       } catch(e) {
-        console.error(e);
+        console.error("Import error:", e);
         status.innerHTML += `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
       }
     }
+
+    // Attach change listener for reliable iOS behavior
+ window.addEventListener('load', () => {
+      const importFileInput = document.getElementById('import-file');
+      if (importFileInput) importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
+      init();
+    });
 
     function showSettingsModal() {
       document.getElementById('settings-modal').style.display = 'flex';
@@ -1203,18 +1178,11 @@
 
       const container = document.getElementById('intervals-container');
       container.innerHTML = `<label style="display:block;margin-bottom:12px;">${getText('review_intervals')}</label>`;
-
       for (let i = 0; i < globalSettings.numSections; i++) {
-        const unit = globalSettings.intervalUnits[i] || 'days';
         container.innerHTML += `
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
             <span style="width:140px;">Section ${i+1}</span>
-            <input type="number" value="${globalSettings.intervals[i] || 0}" class="interval-input" data-index="${i}" style="width:80px;">
-            <select class="interval-unit" data-index="${i}" style="padding:8px;border-radius:8px;">
-              <option value="minutes" ${unit==='minutes'?'selected':''}>Minutes</option>
-              <option value="hours" ${unit==='hours'?'selected':''}>Hours</option>
-              <option value="days" ${unit==='days'?'selected':''}>Days</option>
-            </select>
+            <input type="number" value="${globalSettings.intervals[i] || 0}" class="interval-input" data-index="${i}" style="width:100px;">
           </div>`;
       }
     }
@@ -1228,13 +1196,10 @@
       globalSettings.halfYearMatureReview = document.getElementById('half-year-toggle').checked;
 
       const inputs = document.querySelectorAll('.interval-input');
-      const units = document.querySelectorAll('.interval-unit');
-
       globalSettings.intervals = Array.from(inputs).map(inp => parseInt(inp.value) || 0);
-      globalSettings.intervalUnits = Array.from(units).map(sel => sel.value);
 
       currentLang = document.getElementById('language-select').value;
-      saveSettingsData();
+      saveData();
 
       hideSettingsModal();
       updateNav();
@@ -1242,29 +1207,17 @@
       alert(currentLang === 'zh' ? '✅ 设置已保存' : '✅ Settings saved.');
     }
 
-    async function init() {
-      await loadData();
+    function init() {
+      loadData();
       updateNav();
       if (decks.length === 0) {
-        decks.push({
-          id: generateId(),
-          name: "Demo Deck",
-          description: "Your first deck",
-          newPerDay: 20,
-          cards: []
-        });
-        await saveData();
+        decks.push({ id: generateId(), name: "Demo Deck", description: "Your first deck", newPerDay: 20, cards: [] });
+        saveData();
       }
       navigateTo(0);
     }
 
-    window.addEventListener('load', () => {
-      const importFileInput = document.getElementById('import-file');
-      if (importFileInput) {
-        importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
-      }
-      init();
-    });
+    window.onload = init;
   </script>
 </body>
 </html>
