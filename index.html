@@ -115,7 +115,7 @@
   <div id="main-content" class="container"></div>
 
   <!-- CREATE DECK MODAL -->
-  <div id="create-deck-modal" class="modal" onclick="if(event.target.id==='create-deck-modal')hideCreateDeckModal()">
+ <div id="create-deck-modal" class="modal" onclick="if(event.target.id==='create-deck-modal')hideCreateDeckModal()">
     <div class="modal-content" onclick="event.stopImmediatePropagation()">
       <h2 id="create-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
       <label id="deck-title-label"></label>
@@ -472,10 +472,7 @@
       localStorage.setItem('aoe_lang', currentLang);
     }
 
-    function getTotalCards() {
-      return decks.reduce((a, d) => a + (d.cards ? d.cards.length : 0), 0);
-    }
-
+    // Helper functions (New / Review separation)
     function getNewDue(deck) {
       return deck.cards ? deck.cards.filter(c => c.section === 1).length : 0;
     }
@@ -543,12 +540,11 @@
         const reviewDue = getReviewDueToday();
         const totalDue = newDue + reviewDue;
 
-        // Only show "Review Now!" button if there are due REVIEW words (section 2+)
         let reviewHTML = '';
         if (reviewDue > 0) {
           reviewHTML = `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">${reviewDue} review cards due • Review Now!</button>`;
         } else if (newDue > 0) {
-          reviewHTML = `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">${newDue} new words ready • Go to a deck to study them</div>`;
+          reviewHTML = `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">${newDue} new words ready • Open a deck to study</div>`;
         } else {
           reviewHTML = `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">No cards due today 🎉</div>`;
         }
@@ -593,7 +589,7 @@
       }
     }
 
-    // Only activates when there are due review words (section 2+)
+    // Global Review - only review words
     function startGlobalReview() {
       let reviewCards = [];
       let targetDeckId = null;
@@ -622,368 +618,44 @@
         cards: reviewCards.sort(() => Math.random() - 0.5), 
         index: 0, 
         mode: "normal", 
-        deckId: targetDeckId 
+        deckId: targetDeckId,
+        newCount: 0   // track new words introduced in this session
       };
       loadCurrentCard();
       document.getElementById('study-modal').style.display = 'flex';
     }
 
-    function showCreateDeckModal() {
-      document.getElementById('create-deck-modal').style.display = 'flex';
-      document.getElementById('deck-title').value = '';
-      document.getElementById('deck-desc').value = '';
-      document.getElementById('new-per-day').value = globalSettings.newWordsPerDay;
-      document.getElementById('create-title').textContent = getText('create_new_deck');
-      document.getElementById('deck-title-label').textContent = getText('deck_title');
-      document.getElementById('deck-desc-label').textContent = getText('description_optional');
-      document.getElementById('new-per-day-label').textContent = getText('new_words_per_day');
-      document.getElementById('color-label').textContent = getText('color');
-      document.getElementById('create-btn').textContent = getText('create_deck_btn');
-      renderColorPicker();
-    }
-    function hideCreateDeckModal() { document.getElementById('create-deck-modal').style.display = 'none'; }
+    // Check daily new word limit before showing a new card
+    function checkNewWordLimit() {
+      const limit = globalSettings.newWordsPerDay;
+      const newIntroducedToday = currentStudySession.newCount || 0;
 
-    function renderColorPicker() {
-      const colors = ['#6d28d9','#a855f7','#ec4899','#ef4444','#f59e0b','#10b981','#14b8a6','#3b82f6'];
-      let html = '';
-      colors.forEach((c,i) => html += `<div class="color-dot" style="background:${c}" onclick="selectColor(this)" data-index="${i}"></div>`);
-      document.getElementById('color-picker').innerHTML = html;
-    }
-    function selectColor(el) {
-      document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('selected'));
-      el.classList.add('selected');
-    }
-
-    function saveNewDeck() {
-      const title = document.getElementById('deck-title').value.trim();
-      if (!title) return alert('Deck title is required');
-      decks.push({
-        id: generateId(),
-        name: title,
-        description: document.getElementById('deck-desc').value.trim(),
-        newPerDay: parseInt(document.getElementById('new-per-day').value) || globalSettings.newWordsPerDay,
-        cards: [],
-        color: document.querySelector('.color-dot.selected') ? document.querySelector('.color-dot.selected').style.background : '#6d28d9'
-      });
-      saveData();
-      hideCreateDeckModal();
-      render(0);
-    }
-
-    function openDeck(id) {
-      currentDeckId = id;
-      const deck = decks.find(d => d.id === id);
-      document.getElementById('deck-name-detail').innerHTML = `<span style="background:${deck.color};color:white;padding:4px 12px;border-radius:9999px;font-size:14px;">${deck.name}</span>`;
-      document.getElementById('deck-desc-detail').textContent = deck.description || 'No description';
-      document.getElementById('delete-deck-btn').textContent = getText('delete_deck');
-      document.getElementById('study-now-btn').innerHTML = getText('study_now_btn');
-      document.getElementById('half-year-btn').innerHTML = getText('half_year_btn');
-      document.getElementById('add-card-btn').innerHTML = getText('add_card');
-      document.getElementById('import-apkg-btn').innerHTML = getText('import_apkg');
-      document.getElementById('all-cards-title').textContent = getText('all_cards');
-
-      let statsHTML = '';
-      for (let i = 1; i <= globalSettings.numSections; i++) {
-        const count = deck.cards ? deck.cards.filter(c => c.section === i).length : 0;
-        let label = '';
-        if (i === 1) label = getText('section_new');
-        else if (i === globalSettings.numSections) label = getText('section_done');
-        else label = getText('section_review', globalSettings.intervals[i-1] || 0);
-        statsHTML += `<div class="section-pill"><div style="font-size:28px;font-weight:700;">${count}</div><div style="font-size:13px;">${label}</div></div>`;
-      }
-      document.getElementById('section-stats').innerHTML = statsHTML;
-
-      let listHTML = deck.cards.map(card => `
-        <div style="background:#f8fafc;border-radius:16px;padding:16px;margin-bottom:12px;position:relative;">
-          <div style="font-weight:600;">${card.front || 'No front'}</div>
-          <div style="color:#64748b;margin-top:4px;">${card.back || 'No back'}</div>
-          ${card.image ? `<img src="${card.image}" class="media-preview">` : ''}
-          ${card.media ? `<div style="margin-top:8px;"><audio controls style="width:100%;"><source src="${card.media}"></audio></div>` : ''}
-          <div style="position:absolute;top:12px;right:12px;display:flex;gap:8px;">
-            <button onclick="editCard('${card.id}');event.stopImmediatePropagation()" style="background:#e2e8f0;color:#64748b;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('edit')}</button>
-            <button onclick="deleteCard('${card.id}');event.stopImmediatePropagation()" style="background:#fee2e2;color:#ef4444;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('delete')}</button>
-          </div>
-        </div>
-      `).join('') || `<p style="color:#64748b;text-align:center;padding:40px;">No cards in this deck yet</p>`;
-      document.getElementById('card-list').innerHTML = listHTML;
-
-      document.getElementById('deck-detail-modal').style.display = 'flex';
-    }
-
-    function hideDeckDetailModal() { document.getElementById('deck-detail-modal').style.display = 'none'; }
-
-    function deleteCurrentDeck() {
-      if (!confirm(getText('delete_deck'))) return;
-      decks = decks.filter(d => d.id !== currentDeckId);
-      saveData();
-      hideDeckDetailModal();
-      render(0);
-    }
-
-    function editCard(cardId) {
-      const deck = decks.find(d => d.id === currentDeckId);
-      const card = deck.cards.find(c => c.id === cardId);
-      if (!card) return;
-      currentEditCardId = cardId;
-
-      document.getElementById('edit-front').value = card.front || '';
-      document.getElementById('edit-back').value = card.back || '';
-
-      editImage = card.image || null;
-      editMedia = card.media || null;
-
-      renderEditImagePreview();
-      renderEditMediaPreview();
-
-      document.getElementById('edit-card-title').textContent = getText('edit_card');
-      document.getElementById('image-label').textContent = getText('image');
-      document.getElementById('sound-label').textContent = getText('sound_video');
-      document.getElementById('delete-image-btn').textContent = getText('delete_btn');
-      document.getElementById('edit-record-btn').innerHTML = getText('live_record');
-      document.getElementById('upload-btn').textContent = getText('upload');
-      document.getElementById('delete-media-btn').textContent = getText('delete_btn');
-      document.getElementById('save-changes-btn').textContent = getText('save_changes');
-
-      document.getElementById('edit-card-modal').style.display = 'flex';
-    }
-
-    function renderEditImagePreview() {
-      const container = document.getElementById('edit-image-preview-container');
-      if (editImage) {
-        container.innerHTML = `<img src="${editImage}" class="media-preview" style="display:block;">`;
-      } else {
-        container.innerHTML = `<p style="color:#64748b;padding:20px;text-align:center;border:1px dashed #cbd5e1;border-radius:12px;">${getText('no_image')}</p>`;
-      }
-    }
-
-    function renderEditMediaPreview() {
-      const container = document.getElementById('edit-media-preview-container');
-      if (editMedia) {
-        if (editMedia.includes('audio')) {
-          container.innerHTML = `<audio controls style="width:100%;"><source src="${editMedia}"></audio>`;
-        } else if (editMedia.includes('video')) {
-          container.innerHTML = `<video controls style="width:100%;"><source src="${editMedia}"></video>`;
-        } else {
-          container.innerHTML = `<p style="color:#10b981;">Media attached</p>`;
+      if (currentStudySession.cards[currentStudySession.index] && 
+          currentStudySession.cards[currentStudySession.index].section === 1 && 
+          newIntroducedToday >= limit) {
+        
+        if (!confirm(`You've reached your daily word limit of ${limit}!\n\nContinue anyway?`)) {
+          hideStudyModal();
+          render(0);
+          return false;
         }
-      } else {
-        container.innerHTML = `<p style="color:#64748b;padding:20px;text-align:center;border:1px dashed #cbd5e1;border-radius:12px;">${getText('no_sound')}</p>`;
       }
-    }
-
-    function previewEditImage(input) {
-      const file = input.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = e => {
-          editImage = e.target.result;
-          renderEditImagePreview();
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-
-    function deleteEditImage() {
-      editImage = null;
-      renderEditImagePreview();
-    }
-
-    function previewEditMedia(input) {
-      const file = input.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = e => {
-          editMedia = e.target.result;
-          renderEditMediaPreview();
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-
-    async function toggleEditRecording() {
-      const btn = document.getElementById('edit-record-btn');
-      if (isEditRecording) {
-        editMediaRecorder.stop();
-        isEditRecording = false;
-        btn.innerHTML = getText('live_record');
-        return;
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        editMediaRecorder = new MediaRecorder(stream);
-        editAudioChunks = [];
-        editMediaRecorder.ondataavailable = e => editAudioChunks.push(e.data);
-        editMediaRecorder.onstop = () => {
-          const blob = new Blob(editAudioChunks, { type: 'audio/webm' });
-          const reader = new FileReader();
-          reader.onload = e => {
-            editMedia = e.target.result;
-            renderEditMediaPreview();
-            const audio = new Audio(editMedia);
-            audio.play().catch(() => {});
-          };
-          reader.readAsDataURL(blob);
-        };
-        editMediaRecorder.start();
-        isEditRecording = true;
-        btn.textContent = '⏹ Stop Recording';
-      } catch(e) { 
-        alert('Microphone permission required for live recording'); 
-      }
-    }
-
-    function deleteEditMedia() {
-      editMedia = null;
-      renderEditMediaPreview();
-    }
-
-    function hideEditCardModal() {
-      document.getElementById('edit-card-modal').style.display = 'none';
-      currentEditCardId = null;
-      editImage = null;
-      editMedia = null;
-    }
-
-    function saveEditedCard() {
-      const deck = decks.find(d => d.id === currentDeckId);
-      const card = deck.cards.find(c => c.id === currentEditCardId);
-      if (card) {
-        card.front = document.getElementById('edit-front').value.trim();
-        card.back = document.getElementById('edit-back').value.trim();
-        card.image = editImage;
-        card.media = editMedia;
-        saveData();
-      }
-      hideEditCardModal();
-      openDeck(currentDeckId);
-    }
-
-    function deleteCard(cardId) {
-      if (!confirm(getText('delete'))) return;
-      const deck = decks.find(d => d.id === currentDeckId);
-      deck.cards = deck.cards.filter(c => c.id !== cardId);
-      saveData();
-      openDeck(currentDeckId);
-    }
-
-    function showAddCardModal() {
-      document.getElementById('add-card-modal').style.display = 'flex';
-      document.getElementById('card-front').value = '';
-      document.getElementById('card-back').value = '';
-      currentImage = null;
-      currentMedia = null;
-
-      document.getElementById('add-card-title').textContent = getText('add_new_card');
-      document.getElementById('card-front').placeholder = getText('front_placeholder');
-      document.getElementById('card-back').placeholder = getText('back_placeholder');
-      document.getElementById('image-label-add').textContent = getText('image');
-      document.getElementById('sound-label-add').textContent = getText('sound_video');
-      document.getElementById('record-btn').innerHTML = getText('live_record');
-      document.getElementById('upload-btn-add').textContent = getText('upload');
-      document.getElementById('save-card-btn').textContent = getText('save_changes');
-    }
-    function hideAddCardModal() { document.getElementById('add-card-modal').style.display = 'none'; }
-
-    function previewImage(input) {
-      const file = input.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = e => currentImage = e.target.result;
-        reader.readAsDataURL(file);
-      }
-    }
-
-    function previewMedia(input) {
-      const file = input.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = e => currentMedia = e.target.result;
-        reader.readAsDataURL(file);
-      }
-    }
-
-    async function toggleRecording() {
-      const btn = document.getElementById('record-btn');
-      if (isRecording) {
-        mediaRecorder.stop();
-        isRecording = false;
-        btn.innerHTML = getText('live_record');
-        return;
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        audioChunks = [];
-        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-        mediaRecorder.onstop = () => {
-          const blob = new Blob(audioChunks, { type: 'audio/webm' });
-          const reader = new FileReader();
-          reader.onload = e => { 
-            currentMedia = e.target.result; 
-            const audio = new Audio(currentMedia);
-            audio.play().catch(() => {});
-          };
-          reader.readAsDataURL(blob);
-        };
-        mediaRecorder.start();
-        isRecording = true;
-        btn.textContent = '⏹ Stop Recording';
-      } catch(e) { 
-        alert('Microphone permission required for live recording'); 
-      }
-    }
-
-    function saveCard() {
-      const front = document.getElementById('card-front').value.trim();
-      const back = document.getElementById('card-back').value.trim();
-      if (!front || !back) return alert('Front and back are required');
-
-      const deck = decks.find(d => d.id === currentDeckId);
-      deck.cards.push({
-        id: generateId(),
-        front: front,
-        back: back,
-        image: currentImage,
-        media: currentMedia,
-        section: 1,
-        lastReviewed: null
-      });
-      saveData();
-      hideAddCardModal();
-      openDeck(currentDeckId);
-    }
-
-    function startStudySession(mode) {
-      hideDeckDetailModal();
-      const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
-
-      let sessionCards = [];
-      if (mode === 'mature' && globalSettings.halfYearMatureReview) {
-        sessionCards = deck.cards.filter(c => c.section === globalSettings.numSections).sort(() => Math.random() - 0.5).slice(0, 15);
-        if (sessionCards.length === 0) return alert('No mastered cards for half-year review yet.');
-      } else {
-        sessionCards = deck.cards.filter(c => {
-          if (c.section === 1) return true;
-          if (!c.lastReviewed) return true;
-          const days = (Date.now() - c.lastReviewed) / DAY_MS;
-          return days >= (globalSettings.intervals[c.section-1] || 3);
-        });
-      }
-
-      if (sessionCards.length === 0) return alert('No cards are due right now.');
-
-      currentStudySession = { cards: sessionCards, index: 0, mode, deckId: currentDeckId };
-      loadCurrentCard();
-      document.getElementById('study-modal').style.display = 'flex';
+      return true;
     }
 
     function loadCurrentCard() {
+      if (!checkNewWordLimit()) return;
+
       const s = currentStudySession;
       const card = s.cards[s.index];
 
       document.getElementById('study-deck-name').textContent = decks.find(d => d.id === s.deckId).name;
       document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
+
+      // Count new words shown in this session
+      if (card.section === 1) {
+        s.newCount = (s.newCount || 0) + 1;
+      }
 
       document.getElementById('front-text').innerHTML = card.front || '';
       const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
@@ -1001,8 +673,34 @@
       document.getElementById('correct-btn').innerHTML = getText('correct_btn');
     }
 
-    function flipCard() {
-      document.getElementById('flashcard').classList.toggle('flipped');
+    function startStudySession(mode) {
+      hideDeckDetailModal();
+      const deck = decks.find(d => d.id === currentDeckId);
+      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
+
+      let sessionCards = [];
+      if (mode === 'mature' && globalSettings.halfYearMatureReview) {
+        sessionCards = deck.cards.filter(c => c.section === globalSettings.numSections).sort(() => Math.random() - 0.5).slice(0, 15);
+      } else {
+        sessionCards = deck.cards.filter(c => {
+          if (c.section === 1) return true;
+          if (!c.lastReviewed) return true;
+          const days = (Date.now() - c.lastReviewed) / DAY_MS;
+          return days >= (globalSettings.intervals[c.section-1] || 3);
+        });
+      }
+
+      if (sessionCards.length === 0) return alert('No cards are due right now.');
+
+      currentStudySession = { 
+        cards: sessionCards, 
+        index: 0, 
+        mode, 
+        deckId: currentDeckId,
+        newCount: 0
+      };
+      loadCurrentCard();
+      document.getElementById('study-modal').style.display = 'flex';
     }
 
     function rateCard(correct) {
