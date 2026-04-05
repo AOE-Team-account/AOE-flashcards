@@ -591,13 +591,37 @@
     }
 
     function startGlobalReview() {
+      let reviewCards = [];
+      let targetDeckId = null;
+
       for (let deck of decks) {
-        if (getDeckDue(deck) > 0) {
-          currentDeckId = deck.id;
-          startStudySession('normal');
-          return;
+        const dueReview = getReviewDue(deck);
+        if (dueReview > 0) {
+          targetDeckId = deck.id;
+          reviewCards = deck.cards.filter(c => {
+            if (c.section === 1) return false;
+            if (!c.lastReviewed) return false;
+            const days = (Date.now() - c.lastReviewed) / DAY_MS;
+            return days >= (globalSettings.intervals[c.section-1] || 3);
+          });
+          break;
         }
       }
+
+      if (reviewCards.length === 0) {
+        alert("No review cards due today.\n\nYou can add new cards or check individual decks.");
+        return;
+      }
+
+      currentDeckId = targetDeckId;
+      currentStudySession = { 
+        cards: reviewCards, 
+        index: 0, 
+        mode: "normal", 
+        deckId: targetDeckId 
+      };
+      loadCurrentCard();
+      document.getElementById('study-modal').style.display = 'flex';
     }
 
     function showCreateDeckModal() {
