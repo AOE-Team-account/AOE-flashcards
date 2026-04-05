@@ -291,6 +291,7 @@
       <button onclick="saveSettings()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;" id="save-settings-btn"></button>
     </div>
   </div>
+
 <script>
     let decks = [];
     let currentDeckId = null;
@@ -312,7 +313,7 @@
     let globalSettings = {
       newWordsPerDay: 20,
       numSections: 5,
-      intervals: [0, 1, 7, 30, 365],
+      intervals: [0, 3, 7, 30, 365],
       wrongSection: 3,
       halfYearMatureReview: true
     };
@@ -476,21 +477,40 @@
       return decks.reduce((a, d) => a + (d.cards ? d.cards.length : 0), 0);
     }
 
-    function getDeckDue(deck) {
+    // === NEW FUNCTIONS FOR SEPARATING NEW & REVIEW ===
+    function getNewDue(deck) {
+      return deck.cards ? deck.cards.filter(c => c.section === 1).length : 0;
+    }
+
+    function getReviewDue(deck) {
       const now = Date.now();
       return deck.cards ? deck.cards.filter(c => {
-        if (c.section === 1) return true;
-        if (!c.lastReviewed) return true;
+        if (c.section === 1) return false;
+        if (!c.lastReviewed) return false;
         const daysPassed = (now - c.lastReviewed) / DAY_MS;
-        const interval = globalSettings.intervals[c.section - 1] || 1;
+        const interval = globalSettings.intervals[c.section - 1] || 3;
         return daysPassed >= interval;
       }).length : 0;
     }
 
-    function getDueToday() {
+    function getDeckDue(deck) {
+      return getNewDue(deck) + getReviewDue(deck);
+    }
+
+    function getNewDueToday() {
       let count = 0;
-      decks.forEach(d => count += getDeckDue(d));
+      decks.forEach(d => count += getNewDue(d));
       return count;
+    }
+
+    function getReviewDueToday() {
+      let count = 0;
+      decks.forEach(d => count += getReviewDue(d));
+      return count;
+    }
+
+    function getDueToday() {
+      return getNewDueToday() + getReviewDueToday();
     }
 
     function getReviewedCount() {
@@ -521,29 +541,31 @@
     function render(tab) {
       const main = document.getElementById('main-content');
       if (tab === 0) {
-        const due = getDueToday();
+        const newDue = getNewDueToday();
+        const reviewDue = getReviewDueToday();
+        const totalDue = newDue + reviewDue;
         const reviewed = getReviewedCount();
 
-        let reviewHTML = due > 0 
-          ? `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">You have ${due} words to review • Review Now!</button>`
+        let reviewHTML = totalDue > 0 
+          ? `<button onclick="startGlobalReview()" class="btn btn-primary" style="width:100%;margin:16px 0 24px;padding:18px;font-size:18px;">${totalDue} cards due today • Review Now!</button>`
           : `<div style="text-align:center;margin:24px 0;color:#64748b;font-size:17px;">No more cards to review today 🎉</div>`;
 
         main.innerHTML = `
           <div class="card" style="background: linear-gradient(135deg,#6d28d9,#a855f7);color:white;padding:32px 24px;border-radius:28px;">
             <h2 style="font-size:28px;font-weight:700;">${getText('welcome_back')}</h2>
-            <p style="margin-top:8px;opacity:0.9;">${getText('cards_waiting', due)}</p>
+            <p style="margin-top:8px;opacity:0.9;">${getText('cards_waiting', totalDue)}</p>
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:24px;">
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
                 <div style="font-size:34px;font-weight:700;">${getTotalCards()}</div>
                 <div style="font-size:14px;">${getText('total_cards')}</div>
               </div>
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
-                <div style="font-size:34px;font-weight:700;">${due}</div>
-                <div style="font-size:14px;">${getText('due_today')}</div>
+                <div style="font-size:34px;font-weight:700;color:#fef08c;">${newDue}</div>
+                <div style="font-size:14px;">New Today</div>
               </div>
               <div style="background:rgba(255,255,255,0.25);padding:16px;border-radius:20px;text-align:center;">
-                <div style="font-size:34px;font-weight:700;">${reviewed}</div>
-                <div style="font-size:14px;">${getText('reviewed')}</div>
+                <div style="font-size:34px;font-weight:700;">${reviewDue}</div>
+                <div style="font-size:14px;">Review Today</div>
               </div>
             </div>
           </div>
@@ -561,7 +583,7 @@
           ${decks.length ? decks.map(deck => `
             <div onclick="openDeck('${deck.id}')" class="card" style="cursor:pointer;">
               <div style="font-weight:600;font-size:19px;">${deck.name}</div>
-              <div style="color:#64748b;margin-top:4px;">${deck.cards ? deck.cards.length : 0} cards • ${getDeckDue(deck)} due</div>
+              <div style="color:#64748b;margin-top:4px;">${deck.cards ? deck.cards.length : 0} cards • ${getNewDue(deck)} new • ${getReviewDue(deck)} review</div>
             </div>
           `).join('') : `<div style="text-align:center;padding:80px 20px;color:#64748b;">${getText('no_decks')}<br><br>${getText('tap_new')}</div>`}
         `;
@@ -577,6 +599,7 @@
         }
       }
     }
+
     function showCreateDeckModal() {
       document.getElementById('create-deck-modal').style.display = 'flex';
       document.getElementById('deck-title').value = '';
@@ -977,13 +1000,13 @@
       } else {
         alert('🎉 Study session completed!');
         hideStudyModal();
-        render(0);   // Refresh home with updated Reviewed count
+        render(0);
       }
     }
 
     function hideStudyModal() { document.getElementById('study-modal').style.display = 'none'; }
 
-   function showImportModal() {
+    function showImportModal() {
       document.getElementById('import-modal').style.display = 'flex';
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
@@ -1000,7 +1023,6 @@
       document.getElementById('import-modal').style.display = 'none';
     }
 
-    // FIXED handleImportFile - properly handles modern Anki .apkg with collection.anki21
     async function handleImportFile(input) {
       const file = input.files[0];
       if (!file) return;
@@ -1013,14 +1035,12 @@
       try {
         const zip = await JSZip.loadAsync(file);
 
-        // Prefer collection.anki21 (real data in modern exports), fallback to anki2
         let collectionEntry = zip.file('collection.anki21') || zip.file('collection.anki2');
         if (!collectionEntry) throw new Error('No collection database found in the file.');
 
         const dbBuffer = await collectionEntry.async('arraybuffer');
         const db = new SQL.Database(new Uint8Array(dbBuffer));
 
-        // Quick check to avoid dummy database
         const testStmt = db.prepare("SELECT flds FROM notes LIMIT 1");
         let isDummy = false;
         if (testStmt.step()) {
@@ -1153,13 +1173,6 @@
       }
     }
 
-    // Attach change listener for reliable iOS behavior
- window.addEventListener('load', () => {
-      const importFileInput = document.getElementById('import-file');
-      if (importFileInput) importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
-      init();
-    });
-
     function showSettingsModal() {
       document.getElementById('settings-modal').style.display = 'flex';
       document.getElementById('global-new-per-day').value = globalSettings.newWordsPerDay;
@@ -1216,6 +1229,12 @@
       }
       navigateTo(0);
     }
+
+    window.addEventListener('load', () => {
+      const importFileInput = document.getElementById('import-file');
+      if (importFileInput) importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
+      init();
+    });
 
     window.onload = init;
   </script>
