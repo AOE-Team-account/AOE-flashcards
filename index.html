@@ -22,7 +22,7 @@
       background: #f8fafc;
       color: #1e2937;
       min-height: 100vh;
-      font-size: 17px; /* base font size controlled by slider */
+      font-size: 17px;
     }
     .header {
       background: white;
@@ -62,6 +62,11 @@
       transition: all 0.2s;
     }
     .btn-primary { background: var(--primary); color: white; }
+    .btn-disabled {
+      background: #e2e8f0 !important;
+      color: #94a3b8 !important;
+      cursor: not-allowed !important;
+    }
     .modal {
       position: fixed; inset: 0; background: rgba(15,23,42,0.85);
       display: none; align-items: flex-end; z-index: 200;
@@ -151,7 +156,7 @@
       <div id="section-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin:28px 0 24px;"></div>
 
       <button onclick="startStudySession('normal')" class="btn btn-primary" style="width:100%;padding:18px;font-size:18px;margin-bottom:12px;" id="study-now-btn"></button>
-      <button onclick="startStudySession('mature')" class="btn" style="width:100%;padding:18px;font-size:18px;background:#e2e8f0;" id="half-year-btn"></button>
+      <button onclick="startStudySession('mature')" class="btn" style="width:100%;padding:18px;font-size:18px;" id="half-year-btn"></button>
 
       <div style="margin-top:32px;display:flex;gap:12px;">
         <button onclick="showAddCardModal()" class="btn" style="flex:1;background:#e2e8f0;" id="add-card-btn"></button>
@@ -285,11 +290,10 @@
       <input type="number" id="wrong-section" value="3" min="2" max="5" style="margin-bottom:24px;">
 
       <label id="half-year-label" class="flex items-center gap-3">
-        <input type="checkbox" id="half-year-toggle" checked>
+        <input type="checkbox" id="half-year-toggle" checked onchange="updateHalfYearButtonPreview()">
         <span id="half-year-text"></span>
       </label>
 
-      <!-- New Text Size Slider -->
       <div class="slider-container">
         <div class="slider-label">
           <span id="text-size-label"></span>
@@ -334,7 +338,7 @@
       intervals: [0, 3, 7, 30, 365],
       wrongSection: 3,
       halfYearMatureReview: true,
-      textSize: 18   // new setting
+      textSize: 18
     };
 
     let currentLang = 'en';
@@ -572,34 +576,6 @@
       }).length : 0;
     }
 
-    function getDeckDue(deck) {
-      return getNewDue(deck) + getReviewDue(deck);
-    }
-
-    function getNewDueToday() {
-      let count = 0;
-      decks.forEach(d => count += getNewDue(d));
-      return count;
-    }
-
-    function getReviewDueToday() {
-      let count = 0;
-      decks.forEach(d => count += getReviewDue(d));
-      return count;
-    }
-
-    function getDueToday() {
-      return getNewDueToday() + getReviewDueToday();
-    }
-
-    function getReviewedCount() {
-      let count = 0;
-      decks.forEach(d => {
-        if (d.cards) count += d.cards.filter(c => c.lastReviewed != null).length;
-      });
-      return count;
-    }
-
     function updateNav() {
       const container = document.getElementById('nav-container');
       container.innerHTML = `
@@ -619,7 +595,6 @@
 
     function applyTextSize() {
       document.documentElement.style.fontSize = globalSettings.textSize + 'px';
-      // Update study card text size
       const frontText = document.getElementById('front-text');
       const backText = document.getElementById('back-text');
       if (frontText) frontText.style.fontSize = (globalSettings.textSize + 8) + 'px';
@@ -680,6 +655,39 @@
           `).join('') : `<div style="text-align:center;padding:80px 20px;color:#64748b;">${getText('no_decks')}<br><br>${getText('tap_new')}</div>`}
         `;
       }
+    }
+
+    function getNewDueToday() {
+      let count = 0;
+      decks.forEach(d => count += getNewDue(d));
+      return count;
+    }
+
+    function getReviewDueToday() {
+      let count = 0;
+      decks.forEach(d => count += getReviewDue(d));
+      return count;
+    }
+
+    function updateHalfYearButton() {
+      const btn = document.getElementById('half-year-btn');
+      if (!btn) return;
+      
+      if (globalSettings.halfYearMatureReview) {
+        btn.classList.remove('btn-disabled');
+        btn.style.background = '#e2e8f0';
+        btn.style.color = '#1e2937';
+        btn.onclick = () => startStudySession('mature');
+      } else {
+        btn.classList.add('btn-disabled');
+        btn.style.background = '#e2e8f0';
+        btn.style.color = '#94a3b8';
+        btn.onclick = null;
+      }
+    }
+
+    function updateHalfYearButtonPreview() {
+      // For live preview in settings (optional)
     }
 
     function startGlobalReview() {
@@ -767,6 +775,9 @@
     }
 
     function startStudySession(mode) {
+      if (mode === 'mature' && !globalSettings.halfYearMatureReview) {
+        return; // prevent starting if disabled
+      }
       hideDeckDetailModal();
       const deck = decks.find(d => d.id === currentDeckId);
       if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
@@ -911,6 +922,7 @@
       document.getElementById('card-list').innerHTML = listHTML;
 
       document.getElementById('deck-detail-modal').style.display = 'flex';
+      updateHalfYearButton();   // Apply gray state when opening deck
     }
 
     function hideDeckDetailModal() { document.getElementById('deck-detail-modal').style.display = 'none'; }
@@ -1166,7 +1178,7 @@
       fileInput.value = '';
       
       const label = document.getElementById('import-file-label');
-      if (label) label.textContent = currentLang === 'zh' || currentLang === 'zh-TW' ? '選擇 .apkg 檔案' : 'Select your .apkg / .colpkg / .ofc file';
+      if (label) label.textContent = (currentLang === 'zh' || currentLang === 'zh-TW') ? '選擇 .apkg 檔案' : 'Select your .apkg / .colpkg / .ofc file';
     }
 
     function hideImportModal() {
@@ -1352,7 +1364,6 @@
           </div>`;
       }
 
-      // Slider live update
       const slider = document.getElementById('text-size-slider');
       slider.oninput = () => {
         document.getElementById('text-size-value').textContent = slider.value + 'px';
@@ -1378,7 +1389,13 @@
       applyTextSize();
       updateNav();
       render(0);
-      alert(currentLang === 'zh' || currentLang === 'zh-TW' ? '✅ 設置已保存' : '✅ Settings saved.');
+      
+      // Refresh any open deck detail to update button state
+      if (currentDeckId) {
+        openDeck(currentDeckId);
+      }
+
+      alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '✅ 設置已保存' : '✅ Settings saved.');
     }
 
     function init() {
