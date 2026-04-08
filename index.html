@@ -22,6 +22,7 @@
       background: #f8fafc;
       color: #1e2937;
       min-height: 100vh;
+      font-size: 17px; /* base font size controlled by slider */
     }
     .header {
       background: white;
@@ -103,6 +104,12 @@
       text-align: center; font-size: 15px; font-weight: 600;
     }
     .media-preview { max-height: 160px; border-radius: 12px; margin: 12px 0; }
+    .slider-container {
+      margin: 16px 0 24px;
+    }
+    .slider-label {
+      display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -282,10 +289,21 @@
         <span id="half-year-text"></span>
       </label>
 
+      <!-- New Text Size Slider -->
+      <div class="slider-container">
+        <div class="slider-label">
+          <span id="text-size-label"></span>
+          <span id="text-size-value" style="font-weight:700;">18px</span>
+        </div>
+        <input type="range" id="text-size-slider" min="14" max="28" value="18" step="1" 
+               style="width:100%; accent-color: var(--primary);">
+      </div>
+
       <label id="language-label" style="margin:24px 0 8px;display:block;"></label>
       <select id="language-select" style="width:100%;padding:16px 20px;border:1px solid #cbd5e1;border-radius:16px;">
         <option value="en">English</option>
-        <option value="zh">中文</option>
+        <option value="zh">简体中文</option>
+        <option value="zh-TW">繁體中文</option>
       </select>
 
       <button onclick="saveSettings()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;" id="save-settings-btn"></button>
@@ -315,7 +333,8 @@
       numSections: 5,
       intervals: [0, 3, 7, 30, 365],
       wrongSection: 3,
-      halfYearMatureReview: true
+      halfYearMatureReview: true,
+      textSize: 18   // new setting
     };
 
     let currentLang = 'en';
@@ -363,6 +382,7 @@
         review_intervals: "Review Intervals (days) for each section",
         wrong_section_label: "Wrong answer always goes to section",
         enable_half_year: "Enable half-year mature review from section 5",
+        text_size: "Text Size",
         save_settings: "Save Settings",
         import_title: "Import Anki Deck (.apkg)",
         import_desc: "Select your .apkg file — real notes, fields, images & audio will be imported.",
@@ -422,6 +442,7 @@
         review_intervals: "每个区间的复习间隔（天）",
         wrong_section_label: "答错总是进入区间",
         enable_half_year: "启用第5区间半年成熟复习",
+        text_size: "文字大小",
         save_settings: "保存设置",
         import_title: "导入 Anki 牌组 (.apkg)",
         import_desc: "选择您的 .apkg 文件 — 将导入真实笔记、字段、图片和音频。",
@@ -437,6 +458,66 @@
         nav_home: "🏠 首页",
         nav_create: "✚ 创建",
         nav_settings: "⚙️ 设置"
+      },
+      "zh-TW": {
+        welcome_back: "歡迎回來",
+        cards_waiting: "今天有 {0} 張卡片等待複習。",
+        total_cards: "總卡片",
+        due_today: "今日到期",
+        reviewed: "已複習",
+        your_decks: "您的牌組",
+        import: "導入",
+        new_deck: "+ 新牌組",
+        no_decks: "還沒有牌組。",
+        tap_new: '點擊「新牌組」開始。',
+        create_new_deck: "創建新牌組",
+        deck_title: "牌組名稱",
+        description_optional: "描述（可選）",
+        new_words_per_day: "每日新詞數量",
+        color: "顏色",
+        create_deck_btn: "創建牌組",
+        delete_deck: "刪除牌組",
+        study_now: "開始學習",
+        half_year_review: "半年成熟複習",
+        add_card: "+ 添加卡片",
+        import_apkg: "導入 .apkg / .colpkg / .ofc",
+        all_cards: "所有卡片",
+        edit: "編輯",
+        delete: "刪除",
+        edit_card: "編輯卡片",
+        image: "圖片",
+        sound_video: "聲音 / 視頻",
+        no_image: "未附加圖片",
+        no_sound: "未附加聲音或視頻",
+        live_record: "即時錄製音頻",
+        upload: "上傳",
+        delete_btn: "刪除",
+        save_changes: "保存更改",
+        add_new_card: "添加新卡片",
+        front_placeholder: "正面（問題 / 詞語）",
+        back_placeholder: "背面（答案 / 定義）",
+        global_settings: "全局設置",
+        new_words_global: "每日新詞數量（全局預設）",
+        num_sections: "複習區間數量",
+        review_intervals: "每個區間的複習間隔（天）",
+        wrong_section_label: "答錯總是進入區間",
+        enable_half_year: "啟用第5區間半年成熟複習",
+        text_size: "文字大小",
+        save_settings: "保存設置",
+        import_title: "導入 Anki 牌組 (.apkg)",
+        import_desc: "選擇您的 .apkg 檔案 — 將導入真實筆記、欄位、圖片和音頻。",
+        success_import: "成功導入 {0} 張卡片，文字乾淨且帶有真實圖片和音頻！",
+        import_failed: '導入失敗。<br><br>請在 Anki 中勾選 <strong>“支援舊版 Anki”</strong> 後導出。',
+        study_now_btn: "▶️ 開始學習",
+        half_year_btn: "🌍 半年成熟複習",
+        wrong_btn: "✕ 錯誤",
+        correct_btn: "✓ 正確",
+        section_new: "新詞",
+        section_review: "複習 ({0} 天)",
+        section_done: "已完成！(每年)",
+        nav_home: "🏠 首頁",
+        nav_create: "✚ 創建",
+        nav_settings: "⚙️ 設置"
       }
     };
 
@@ -534,6 +615,15 @@
       if (tab === 4) showSettingsModal();
       else if (tab === 1) showCreateDeckModal();
       else render(tab);
+    }
+
+    function applyTextSize() {
+      document.documentElement.style.fontSize = globalSettings.textSize + 'px';
+      // Update study card text size
+      const frontText = document.getElementById('front-text');
+      const backText = document.getElementById('back-text');
+      if (frontText) frontText.style.fontSize = (globalSettings.textSize + 8) + 'px';
+      if (backText) backText.style.fontSize = (globalSettings.textSize + 8) + 'px';
     }
 
     function render(tab) {
@@ -672,6 +762,8 @@
       document.getElementById('rating-buttons').style.display = 'grid';
       document.getElementById('wrong-btn').innerHTML = getText('wrong_btn');
       document.getElementById('correct-btn').innerHTML = getText('correct_btn');
+
+      applyTextSize();
     }
 
     function startStudySession(mode) {
@@ -1074,7 +1166,7 @@
       fileInput.value = '';
       
       const label = document.getElementById('import-file-label');
-      if (label) label.textContent = currentLang === 'zh' ? '选择 .apkg 文件' : 'Select your .apkg / .colpkg / .ofc file';
+      if (label) label.textContent = currentLang === 'zh' || currentLang === 'zh-TW' ? '選擇 .apkg 檔案' : 'Select your .apkg / .colpkg / .ofc file';
     }
 
     function hideImportModal() {
@@ -1238,13 +1330,16 @@
       document.getElementById('wrong-section').value = globalSettings.wrongSection;
       document.getElementById('half-year-toggle').checked = globalSettings.halfYearMatureReview;
       document.getElementById('language-select').value = currentLang;
+      document.getElementById('text-size-slider').value = globalSettings.textSize || 18;
+      document.getElementById('text-size-value').textContent = (globalSettings.textSize || 18) + 'px';
 
       document.getElementById('settings-title').textContent = getText('global_settings');
       document.getElementById('global-new-label').textContent = getText('new_words_global');
       document.getElementById('num-sections-label').textContent = getText('num_sections');
       document.getElementById('wrong-section-label').textContent = getText('wrong_section_label');
       document.getElementById('half-year-text').textContent = getText('enable_half_year');
-      document.getElementById('language-label').innerHTML = 'Interface Language / 界面语言';
+      document.getElementById('text-size-label').textContent = getText('text_size');
+      document.getElementById('language-label').innerHTML = 'Interface Language / 界面語言';
       document.getElementById('save-settings-btn').textContent = getText('save_settings');
 
       const container = document.getElementById('intervals-container');
@@ -1256,6 +1351,12 @@
             <input type="number" value="${globalSettings.intervals[i] || 0}" class="interval-input" data-index="${i}" style="width:100px;">
           </div>`;
       }
+
+      // Slider live update
+      const slider = document.getElementById('text-size-slider');
+      slider.oninput = () => {
+        document.getElementById('text-size-value').textContent = slider.value + 'px';
+      };
     }
 
     function hideSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
@@ -1265,6 +1366,7 @@
       globalSettings.numSections = parseInt(document.getElementById('num-sections').value) || 5;
       globalSettings.wrongSection = parseInt(document.getElementById('wrong-section').value) || 3;
       globalSettings.halfYearMatureReview = document.getElementById('half-year-toggle').checked;
+      globalSettings.textSize = parseInt(document.getElementById('text-size-slider').value) || 18;
 
       const inputs = document.querySelectorAll('.interval-input');
       globalSettings.intervals = Array.from(inputs).map(inp => parseInt(inp.value) || 0);
@@ -1273,9 +1375,10 @@
       saveData();
 
       hideSettingsModal();
+      applyTextSize();
       updateNav();
       render(0);
-      alert(currentLang === 'zh' ? '✅ 设置已保存' : '✅ Settings saved.');
+      alert(currentLang === 'zh' || currentLang === 'zh-TW' ? '✅ 設置已保存' : '✅ Settings saved.');
     }
 
     function init() {
@@ -1285,6 +1388,7 @@
         decks.push({ id: generateId(), name: "Demo Deck", description: "Your first deck", newPerDay: 20, cards: [] });
         saveData();
       }
+      applyTextSize();
       navigateTo(0);
     }
 
