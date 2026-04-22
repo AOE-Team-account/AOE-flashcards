@@ -566,6 +566,30 @@
       return mimeMap[ext] || 'application/octet-stream';
     }
 
+
+    function cleanupImportedFieldText(text) {
+      if (!text) return '';
+      let cleaned = String(text);
+
+      cleaned = cleaned
+        .replace(/\[sound:[^\]]+\]/gi, '')
+        .replace(/<audio[^>]*>[\s\S]*?<\/audio>/gi, '')
+        .replace(/<video[^>]*>[\s\S]*?<\/video>/gi, '')
+        .replace(/<source[^>]*>/gi, '')
+        .replace(/<img[^>]*>/gi, '')
+        .replace(/\[\s*\]/g, '')
+        .replace(/(^|\s)\[(\s*)(?=$|\s)/g, '$1')
+        .replace(/(^|\s)\](\s*)(?=$|\s)/g, '$1')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s*<br\s*\/?>\s*/gi, '<br>')
+        .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
+        .replace(/[ 	]{2,}/g, ' ')
+        .replace(/(?:\s*<br>\s*)+$/gi, '')
+        .trim();
+
+      return cleaned;
+    }
+
     function normalizeCardMedia(card) {
       if (!card) return;
       if (Array.isArray(card.mediaList)) {
@@ -1357,7 +1381,7 @@
               back = back.replace(imgRegex, '').trim();
             }
 
-            const soundRegex = new RegExp(`\[sound:${safeKey}\]`, 'gi');
+            const soundRegex = new RegExp(`\\[sound:${safeKey}\\]`, 'gi');
             if (soundRegex.test(front)) {
               if (!seenMedia.has(dataUrl)) {
                 cardMediaList.push(dataUrl);
@@ -1407,6 +1431,9 @@
               back = back.replace(videoSrcRegex, '').replace(videoSourceRegex, '').trim();
             }
           });
+
+          front = cleanupImportedFieldText(front);
+          back = cleanupImportedFieldText(back);
 
           importedCards.push({
             id: generateId(),
