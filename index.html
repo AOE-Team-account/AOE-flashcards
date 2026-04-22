@@ -551,6 +551,66 @@
       SQL = await initSqlJs(config);
     }
 
+
+    function escapeRegExp(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function getMimeType(filename) {
+      const ext = ((filename || '').split('.').pop() || '').toLowerCase();
+      const mimeMap = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', avif: 'image/avif',
+        mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac', opus: 'audio/opus', webm: 'audio/webm',
+        mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska'
+      };
+      return mimeMap[ext] || 'application/octet-stream';
+    }
+
+    function normalizeCardMedia(card) {
+      if (!card) return;
+      if (Array.isArray(card.mediaList)) {
+        card.mediaList = card.mediaList.filter(Boolean);
+      } else if (card.media) {
+        card.mediaList = [card.media];
+      } else {
+        card.mediaList = [];
+      }
+      if (!card.media && card.mediaList.length) card.media = card.mediaList[0];
+    }
+
+    function getPrimaryMedia(card) {
+      normalizeCardMedia(card);
+      return card.mediaList[0] || card.media || null;
+    }
+
+    function getAudioList(card) {
+      normalizeCardMedia(card);
+      return card.mediaList.filter(src => typeof src === 'string' && src.startsWith('data:audio'));
+    }
+
+    function getVideoList(card) {
+      normalizeCardMedia(card);
+      return card.mediaList.filter(src => typeof src === 'string' && src.startsWith('data:video'));
+    }
+
+    function buildMediaPreviewHTML(card) {
+      normalizeCardMedia(card);
+      const audioList = getAudioList(card);
+      const videoList = getVideoList(card);
+      let html = '';
+      if (audioList.length) {
+        html += audioList.map((src, idx) => `\n          <div style="margin-top:8px;">\n            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Audio ${idx + 1}</div>\n            <audio controls style="width:100%;"><source src="${src}"></audio>\n          </div>`).join('');
+      }
+      if (videoList.length) {
+        html += videoList.map((src, idx) => `\n          <div style="margin-top:8px;">\n            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Video ${idx + 1}</div>\n            <video controls style="width:100%;max-height:240px;border-radius:12px;"><source src="${src}"></video>\n          </div>`).join('');
+      }
+      if (!html && card.media) {
+        if (card.media.includes('audio')) html = `<div style="margin-top:8px;"><audio controls style="width:100%;"><source src="${card.media}"></audio></div>`;
+        else if (card.media.includes('video')) html = `<div style="margin-top:8px;"><video controls style="width:100%;max-height:240px;border-radius:12px;"><source src="${card.media}"></video></div>`;
+      }
+      return html;
+    }
+
     function loadData() {
       const savedDecks = localStorage.getItem('aoe_decks');
       const savedSettings = localStorage.getItem('aoe_settings');
@@ -558,6 +618,10 @@
       if (savedDecks) decks = JSON.parse(savedDecks);
       if (savedSettings) globalSettings = JSON.parse(savedSettings);
       if (savedLang) currentLang = savedLang;
+      decks.forEach(deck => {
+        if (!deck.cards) deck.cards = [];
+        deck.cards.forEach(card => normalizeCardMedia(card));
+      });
     }
 
     function saveData() {
@@ -766,13 +830,15 @@
 
       document.getElementById('front-text').innerHTML = card.front || '';
       const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
-      const fAud = document.getElementById('front-audio'); fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) fAud.src = card.media;
-      const fVid = document.getElementById('front-video'); fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) fVid.src = card.media;
+      const frontAudios = getAudioList(card);
+      const frontVideos = getVideoList(card);
+      const fAud = document.getElementById('front-audio'); fAud.style.display = frontAudios.length ? 'block' : 'none'; if (frontAudios.length) fAud.src = frontAudios[0]; else fAud.removeAttribute('src'); fAud.load();
+      const fVid = document.getElementById('front-video'); fVid.style.display = frontVideos.length ? 'block' : 'none'; if (frontVideos.length) fVid.src = frontVideos[0]; else fVid.removeAttribute('src'); fVid.load();
 
       document.getElementById('back-text').innerHTML = card.back || '';
       const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
-      const bAud = document.getElementById('back-audio'); bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) bAud.src = card.media;
-      const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
+      const bAud = document.getElementById('back-audio'); bAud.style.display = frontAudios.length ? 'block' : 'none'; if (frontAudios.length) bAud.src = frontAudios[0]; else bAud.removeAttribute('src'); bAud.load();
+      const bVid = document.getElementById('back-video'); bVid.style.display = frontVideos.length ? 'block' : 'none'; if (frontVideos.length) bVid.src = frontVideos[0]; else bVid.removeAttribute('src'); bVid.load();
 
       document.getElementById('flashcard').classList.remove('flipped');
       document.getElementById('rating-buttons').style.display = 'grid';
@@ -920,7 +986,7 @@
           <div style="font-weight:600;">${card.front || 'No front'}</div>
           <div style="color:#64748b;margin-top:4px;">${card.back || 'No back'}</div>
           ${card.image ? `<img src="${card.image}" class="media-preview">` : ''}
-          ${card.media ? `<div style="margin-top:8px;"><audio controls style="width:100%;"><source src="${card.media}"></audio></div>` : ''}
+          ${buildMediaPreviewHTML(card)}
           <div style="position:absolute;top:12px;right:12px;display:flex;gap:8px;">
             <button onclick="editCard('${card.id}');event.stopImmediatePropagation()" style="background:#e2e8f0;color:#64748b;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('edit')}</button>
             <button onclick="deleteCard('${card.id}');event.stopImmediatePropagation()" style="background:#fee2e2;color:#ef4444;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('delete')}</button>
@@ -953,7 +1019,7 @@
       document.getElementById('edit-back').value = card.back || '';
 
       editImage = card.image || null;
-      editMedia = card.media || null;
+      editMedia = Array.isArray(card.mediaList) ? [...card.mediaList] : (card.media ? [card.media] : null);
 
       renderEditImagePreview();
       renderEditMediaPreview();
@@ -981,14 +1047,17 @@
 
     function renderEditMediaPreview() {
       const container = document.getElementById('edit-media-preview-container');
-      if (editMedia) {
-        if (editMedia.includes('audio')) {
-          container.innerHTML = `<audio controls style="width:100%;"><source src="${editMedia}"></audio>`;
-        } else if (editMedia.includes('video')) {
-          container.innerHTML = `<video controls style="width:100%;"><source src="${editMedia}"></video>`;
-        } else {
-          container.innerHTML = `<p style="color:#10b981;">Media attached</p>`;
-        }
+      const mediaList = Array.isArray(editMedia) ? editMedia.filter(Boolean) : (editMedia ? [editMedia] : []);
+      if (mediaList.length) {
+        container.innerHTML = mediaList.map((src, idx) => {
+          if (typeof src === 'string' && src.startsWith('data:audio')) {
+            return `<div style="margin-bottom:12px;"><div style="font-size:12px;color:#64748b;margin-bottom:4px;">Audio ${idx + 1}</div><audio controls style="width:100%;"><source src="${src}"></audio></div>`;
+          }
+          if (typeof src === 'string' && src.startsWith('data:video')) {
+            return `<div style="margin-bottom:12px;"><div style="font-size:12px;color:#64748b;margin-bottom:4px;">Video ${idx + 1}</div><video controls style="width:100%;max-height:240px;border-radius:12px;"><source src="${src}"></video></div>`;
+          }
+          return `<p style="color:#10b981;">Media attached</p>`;
+        }).join('');
       } else {
         container.innerHTML = `<p style="color:#64748b;padding:20px;text-align:center;border:1px dashed #cbd5e1;border-radius:12px;">${getText('no_sound')}</p>`;
       }
@@ -1016,7 +1085,7 @@
       if (file) {
         const reader = new FileReader();
         reader.onload = e => {
-          editMedia = e.target.result;
+          editMedia = [e.target.result];
           renderEditMediaPreview();
         };
         reader.readAsDataURL(file);
@@ -1040,7 +1109,7 @@
           const blob = new Blob(editAudioChunks, { type: 'audio/webm' });
           const reader = new FileReader();
           reader.onload = e => {
-            editMedia = e.target.result;
+            editMedia = [e.target.result];
             renderEditMediaPreview();
             const audio = new Audio(editMedia);
             audio.play().catch(() => {});
@@ -1074,7 +1143,8 @@
         card.front = document.getElementById('edit-front').value.trim();
         card.back = document.getElementById('edit-back').value.trim();
         card.image = editImage;
-        card.media = editMedia;
+        card.mediaList = Array.isArray(editMedia) ? editMedia.filter(Boolean) : (editMedia ? [editMedia] : []);
+        card.media = card.mediaList[0] || null;
         saveData();
       }
       hideEditCardModal();
@@ -1120,7 +1190,7 @@
       const file = input.files[0];
       if (file) {
         const reader = new FileReader();
-        reader.onload = e => currentMedia = e.target.result;
+        reader.onload = e => currentMedia = [e.target.result];
         reader.readAsDataURL(file);
       }
     }
@@ -1142,7 +1212,7 @@
           const blob = new Blob(audioChunks, { type: 'audio/webm' });
           const reader = new FileReader();
           reader.onload = e => { 
-            currentMedia = e.target.result; 
+            currentMedia = [e.target.result]; 
             const audio = new Audio(currentMedia);
             audio.play().catch(() => {});
           };
@@ -1167,7 +1237,8 @@
         front: front,
         back: back,
         image: currentImage,
-        media: currentMedia,
+        mediaList: Array.isArray(currentMedia) ? currentMedia.filter(Boolean) : (currentMedia ? [currentMedia] : []),
+        media: (Array.isArray(currentMedia) ? currentMedia[0] : currentMedia) || null,
         section: 1,
         lastReviewed: null
       });
@@ -1233,15 +1304,11 @@
           const mediaFilenameMap = JSON.parse(mediaJsonText);
 
           for (const [indexStr, realFilename] of Object.entries(mediaFilenameMap)) {
-            const entry = zip.file(indexStr);
+            const entry = zip.file(indexStr) || zip.file(realFilename);
             if (entry) {
               const data = await entry.async('base64');
-              const ext = (realFilename.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
+              const mime = getMimeType(realFilename);
+              const dataUrl = `data:${mime};base64,${data}`;
               mediaMap[indexStr] = dataUrl;
               mediaMap[realFilename] = dataUrl;
             }
@@ -1250,18 +1317,14 @@
 
         if (Object.keys(mediaMap).length === 0) {
           const mediaFiles = Object.keys(zip.files).filter(name => 
-            name.match(/^\d+$/) || name.match(/\.(jpg|png|gif|mp3|ogg|wav|mp4|webm)$/i)
+            name.match(/^\d+$/) || name.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|mp3|m4a|aac|ogg|oga|wav|flac|opus|mp4|m4v|mov|mkv|webm)$/i)
           );
           for (const fname of mediaFiles) {
             const entry = zip.file(fname);
             if (entry) {
               const data = await entry.async('base64');
-              const ext = (fname.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
+              const mime = getMimeType(fname);
+              const dataUrl = `data:${mime};base64,${data}`;
               mediaMap[fname] = dataUrl;
             }
           }
@@ -1272,34 +1335,76 @@
 
         while (notesStmt.step()) {
           const row = notesStmt.get();
-          const fields = (row[0] || '').split('\x1f');
+          const fields = (row[0] || '').split('');
           let front = fields[0] || 'No front';
           let back = fields[1] || (fields.slice(1).join(' • ') || 'No back');
 
           let cardImage = null;
-          let cardMedia = null;
+          const cardMediaList = [];
+          const seenMedia = new Set();
 
           Object.keys(mediaMap).forEach(key => {
             const dataUrl = mediaMap[key];
+            const safeKey = escapeRegExp(key);
 
-            const imgRegex = new RegExp(`<img[^>]*src=["']${key}["'][^>]*>`, 'gi');
+            const imgRegex = new RegExp(`<img[^>]*src=["']${safeKey}["'][^>]*>`, 'gi');
             if (imgRegex.test(front)) {
-              cardImage = dataUrl;
+              cardImage = cardImage || dataUrl;
               front = front.replace(imgRegex, '').trim();
             }
             if (imgRegex.test(back)) {
-              cardImage = dataUrl;
+              cardImage = cardImage || dataUrl;
               back = back.replace(imgRegex, '').trim();
             }
 
-            const soundRegex = new RegExp(`\\[sound:${key}\\]`, 'gi');
+            const soundRegex = new RegExp(`\[sound:${safeKey}\]`, 'gi');
             if (soundRegex.test(front)) {
-              cardMedia = dataUrl;
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
               front = front.replace(soundRegex, '').trim();
             }
             if (soundRegex.test(back)) {
-              cardMedia = dataUrl;
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
               back = back.replace(soundRegex, '').trim();
+            }
+
+            const audioSrcRegex = new RegExp(`<audio[^>]*src=["']${safeKey}["'][^>]*>(?:.*?)<\/audio>`, 'gis');
+            const audioSourceRegex = new RegExp(`<audio[^>]*>(?:.*?)<source[^>]*src=["']${safeKey}["'][^>]*>(?:.*?)<\/audio>`, 'gis');
+            if (audioSrcRegex.test(front) || audioSourceRegex.test(front)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
+              front = front.replace(audioSrcRegex, '').replace(audioSourceRegex, '').trim();
+            }
+            if (audioSrcRegex.test(back) || audioSourceRegex.test(back)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
+              back = back.replace(audioSrcRegex, '').replace(audioSourceRegex, '').trim();
+            }
+
+            const videoSrcRegex = new RegExp(`<video[^>]*src=["']${safeKey}["'][^>]*>(?:.*?)<\/video>`, 'gis');
+            const videoSourceRegex = new RegExp(`<video[^>]*>(?:.*?)<source[^>]*src=["']${safeKey}["'][^>]*>(?:.*?)<\/video>`, 'gis');
+            if (videoSrcRegex.test(front) || videoSourceRegex.test(front)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
+              front = front.replace(videoSrcRegex, '').replace(videoSourceRegex, '').trim();
+            }
+            if (videoSrcRegex.test(back) || videoSourceRegex.test(back)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
+              back = back.replace(videoSrcRegex, '').replace(videoSourceRegex, '').trim();
             }
           });
 
@@ -1308,7 +1413,8 @@
             front: front,
             back: back,
             image: cardImage,
-            media: cardMedia,
+            mediaList: cardMediaList,
+            media: cardMediaList[0] || null,
             section: 1,
             lastReviewed: null
           });
