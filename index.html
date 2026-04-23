@@ -1193,6 +1193,7 @@
       document.getElementById('import-modal').style.display = 'none';
     }
 
+    
     async function handleImportFile(input) {
       const file = input.files[0];
       if (!file) return;
@@ -1205,7 +1206,7 @@
       try {
         const zip = await JSZip.loadAsync(file);
 
-        let collectionEntry = zip.file('collection.anki21') || zip.file('collection.anki2');
+        const collectionEntry = zip.file('collection.anki21') || zip.file('collection.anki2');
         if (!collectionEntry) throw new Error('No collection database found in the file.');
 
         const dbBuffer = await collectionEntry.async('arraybuffer');
@@ -1225,83 +1226,119 @@
           throw new Error('This appears to be a dummy database. Please re-export from Anki with "Support older Anki versions" checked.');
         }
 
-        const mediaMap = {};
+        status.innerHTML += `<p>🧠 Reading deck database...</p>`;
 
+        const mediaNameToIndex = {};
         const mediaJsonFile = zip.file('media');
+
         if (mediaJsonFile) {
           const mediaJsonText = await mediaJsonFile.async('string');
           const mediaFilenameMap = JSON.parse(mediaJsonText);
-
           for (const [indexStr, realFilename] of Object.entries(mediaFilenameMap)) {
-            const entry = zip.file(indexStr);
-            if (entry) {
-              const data = await entry.async('base64');
-              const ext = (realFilename.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
-              mediaMap[indexStr] = dataUrl;
-              mediaMap[realFilename] = dataUrl;
-            }
+            mediaNameToIndex[realFilename] = indexStr;
           }
         }
 
-        if (Object.keys(mediaMap).length === 0) {
-          const mediaFiles = Object.keys(zip.files).filter(name => 
-            name.match(/^\d+$/) || name.match(/\.(jpg|png|gif|mp3|ogg|wav|mp4|webm)$/i)
-          );
-          for (const fname of mediaFiles) {
-            const entry = zip.file(fname);
-            if (entry) {
-              const data = await entry.async('base64');
-              const ext = (fname.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
-              mediaMap[fname] = dataUrl;
-            }
+        const dataUrlCache = new Map();
+
+        function getMimeType(filename) {
+          const ext = (filename.split('.').pop() || '').toLowerCase();
+          if (['jpg', 'jpeg'].includes(ext)) return 'image/jpeg';
+          if (ext === 'png') return 'image/png';
+          if (ext === 'gif') return 'image/gif';
+          if (ext === 'webp') return 'image/webp';
+          if (ext === 'svg') return 'image/svg+xml';
+          if (ext === 'mp3') return 'audio/mpeg';
+          if (ext === 'ogg') return 'audio/ogg';
+          if (ext === 'wav') return 'audio/wav';
+          if (ext === 'm4a') return 'audio/mp4';
+          if (ext === 'aac') return 'audio/aac';
+          if (ext === 'mp4') return 'video/mp4';
+          if (ext === 'webm') return 'video/webm';
+          if (ext === 'mov') return 'video/quicktime';
+          return 'application/octet-stream';
+        }
+
+        function blobToDataURL(blob) {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+
+        async function getMediaDataUrl(refName) {
+          if (!refName) return null;
+          if (dataUrlCache.has(refName)) return dataUrlCache.get(refName);
+
+          const zipKey = zip.file(refName)
+            ? refName
+            : (mediaNameToIndex[refName] && zip.file(mediaNameToIndex[refName]) ? mediaNameToIndex[refName] : null);
+
+          if (!zipKey) {
+            dataUrlCache.set(refName, null);
+            return null;
           }
+
+          const entry = zip.file(zipKey);
+          const blob = await entry.async('blob');
+          const typedBlob = blob.type ? blob : new Blob([blob], { type: getMimeType(refName) });
+          const dataUrl = await blobToDataURL(typedBlob);
+
+          dataUrlCache.set(refName, dataUrl);
+          if (zipKey !== refName) dataUrlCache.set(zipKey, dataUrl);
+          return dataUrl;
+        }
+
+        function stripHtml(text) {
+          return (text || '')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/div>|<\/p>|<\/li>|<\/h[1-6]>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        }
+
+        function extractFirstImageRef(text) {
+          const match = (text || '').match(/<img[^>]*src=["']([^"']+)["'][^>]*>/i);
+          return match ? match[1] : null;
+        }
+
+        function extractFirstSoundRef(text) {
+          const match = (text || '').match(/\[sound:([^\]]+)\]/i);
+          return match ? match[1] : null;
+        }
+
+        function removeMediaMarkup(text) {
+          return stripHtml(
+            (text || '')
+              .replace(/<img[^>]*>/gi, ' ')
+              .replace(/\[sound:[^\]]+\]/gi, ' ')
+          );
         }
 
         const notesStmt = db.prepare("SELECT flds FROM notes");
         const importedCards = [];
+        let processed = 0;
 
         while (notesStmt.step()) {
           const row = notesStmt.get();
           const fields = (row[0] || '').split('\x1f');
-          let front = fields[0] || 'No front';
-          let back = fields[1] || (fields.slice(1).join(' • ') || 'No back');
 
-          let cardImage = null;
-          let cardMedia = null;
+          const frontRaw = fields[0] || 'No front';
+          const backRaw = fields[1] || (fields.slice(1).join(' • ') || 'No back');
 
-          Object.keys(mediaMap).forEach(key => {
-            const dataUrl = mediaMap[key];
+          const imageRef = extractFirstImageRef(frontRaw) || extractFirstImageRef(backRaw);
+          const mediaRef = extractFirstSoundRef(frontRaw) || extractFirstSoundRef(backRaw);
 
-            const imgRegex = new RegExp(`<img[^>]*src=["']${key}["'][^>]*>`, 'gi');
-            if (imgRegex.test(front)) {
-              cardImage = dataUrl;
-              front = front.replace(imgRegex, '').trim();
-            }
-            if (imgRegex.test(back)) {
-              cardImage = dataUrl;
-              back = back.replace(imgRegex, '').trim();
-            }
+          const [cardImage, cardMedia] = await Promise.all([
+            imageRef ? getMediaDataUrl(imageRef) : Promise.resolve(null),
+            mediaRef ? getMediaDataUrl(mediaRef) : Promise.resolve(null)
+          ]);
 
-            const soundRegex = new RegExp(`\\[sound:${key}\\]`, 'gi');
-            if (soundRegex.test(front)) {
-              cardMedia = dataUrl;
-              front = front.replace(soundRegex, '').trim();
-            }
-            if (soundRegex.test(back)) {
-              cardMedia = dataUrl;
-              back = back.replace(soundRegex, '').trim();
-            }
-          });
+          const front = removeMediaMarkup(frontRaw) || 'No front';
+          const back = removeMediaMarkup(backRaw) || 'No back';
 
           importedCards.push({
             id: generateId(),
@@ -1312,9 +1349,16 @@
             section: 1,
             lastReviewed: null
           });
+
+          processed++;
+          if (processed % 100 === 0) {
+            status.innerHTML = `<p>📦 Loading ${file.name}...</p><p>🧠 Imported ${processed} cards so far...</p>`;
+            await new Promise(resolve => requestAnimationFrame(resolve));
+          }
         }
 
         notesStmt.free();
+        db.close();
 
         const deckName = file.name.replace(/\.(apkg|colpkg|ofc)$/i, '') || 'Imported Deck';
         const newDeck = {
@@ -1329,21 +1373,22 @@
         decks.push(newDeck);
         saveData();
 
-        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
-        
+        status.innerHTML = `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
+
         setTimeout(() => {
           hideImportModal();
           render(0);
           if (newDeck.id) openDeck(newDeck.id);
-        }, 1500);
+        }, 800);
 
-      } catch(e) {
+      } catch (e) {
         console.error("Import error:", e);
         status.innerHTML += `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
       }
     }
 
-    function showSettingsModal() {
+    function showSettingsModal
+() {
       document.getElementById('settings-modal').style.display = 'flex';
       document.getElementById('global-new-per-day').value = globalSettings.newWordsPerDay;
       document.getElementById('num-sections').value = globalSettings.numSections;
