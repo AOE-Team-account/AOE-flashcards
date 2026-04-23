@@ -545,10 +545,11 @@
 
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
 
-    async function initSQL() {
-      if (SQL) return;
-      const config = { locateFile: file => `./vendor/${file}` };
-      SQL = await initSqlJs(config);
+async function initSQL() {
+  if (SQL) return;
+  const config = { locateFile: file => `./vendor/${file}` };
+  SQL = await initSqlJs(config);
+}
     }
 
 
