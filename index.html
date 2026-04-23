@@ -11,8 +11,8 @@
 
   <title>AOE flashcards</title>
   
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.min.js"></script>
+  <script src="./vendor/jszip.min.js"></script>
+  <script src="./vendor/sql-wasm.js"></script>
   
   <style>
     :root { --primary: #6d28d9; }
@@ -547,7 +547,7 @@
 
     async function initSQL() {
       if (SQL) return;
-      const config = { locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` };
+      const config = { locateFile: file => `./vendor/${file}` };
       SQL = await initSqlJs(config);
     }
 
