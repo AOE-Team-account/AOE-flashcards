@@ -238,18 +238,18 @@
       SQL = await initSqlJs(config);
     }
 
-    function createSavePayload() {
+    function buildBackupPayload() {
       return {
         version: 1,
-        exportedAt: new Date().toISOString(),
         app: "AOE flashcards",
+        exportedAt: new Date().toISOString(),
         decks: decks,
         settings: globalSettings,
         lang: currentLang
       };
     }
 
-    function getSaveVersions() {
+    function getLocalVersions() {
       try {
         return JSON.parse(localStorage.getItem(AUTO_SAVE_VERSIONS_KEY) || '[]');
       } catch (e) {
@@ -257,13 +257,12 @@
       }
     }
 
-    function saveAutoVersion(reason = 'autosave') {
+    function saveAutoVersion(reason) {
       if (isRestoringVersion) return;
 
       try {
-        const payload = createSavePayload();
-        const versions = getSaveVersions();
-
+        const payload = buildBackupPayload();
+        const versions = getLocalVersions();
         const snapshot = JSON.stringify({
           decks: payload.decks,
           settings: payload.settings,
@@ -275,11 +274,11 @@
         versions.unshift({
           id: generateId(),
           timestamp: Date.now(),
-          reason,
-          snapshot,
+          reason: reason || 'autosave',
+          snapshot: snapshot,
           deckCount: Array.isArray(payload.decks) ? payload.decks.length : 0,
           cardCount: Array.isArray(payload.decks)
-            ? payload.decks.reduce((sum, deck) => sum + ((deck.cards && deck.cards.length) || 0), 0)
+            ? payload.decks.reduce((sum, d) => sum + ((d.cards && d.cards.length) || 0), 0)
             : 0
         });
 
@@ -289,7 +288,7 @@
 
         localStorage.setItem(AUTO_SAVE_VERSIONS_KEY, JSON.stringify(versions));
       } catch (e) {
-        console.warn('Auto-save version failed:', e);
+        console.warn('Auto-save failed', e);
       }
     }
 
@@ -302,22 +301,107 @@
       if (savedLang) currentLang = savedLang;
     }
 
-    function saveData(reason = 'autosave') {
+    function saveData(reason) {
       localStorage.setItem('aoe_decks', JSON.stringify(decks));
       localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
       localStorage.setItem('aoe_lang', currentLang);
-      saveAutoVersion(reason);
+      saveAutoVersion(reason || 'save');
     }
 
-    function formatVersionTime(timestamp) {
-      return new Date(timestamp).toLocaleString();
+    function exportJSONBackup() {
+      try {
+        const payload = buildBackupPayload();
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.href = url;
+        a.download = `aoe-flashcards-backup-${stamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error(e);
+        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '导出失败。' : 'Export failed.');
+      }
     }
 
-    function restoreSaveVersion(versionId) {
-      const versions = getSaveVersions();
+    function triggerJSONImport() {
+      let input = document.getElementById('json-backup-import');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json,application/json';
+        input.id = 'json-backup-import';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+      }
+
+      input.value = '';
+      input.onchange = function() {
+        importJSONBackup(input);
+      };
+      input.click();
+    }
+
+    function importJSONBackup(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const parsed = JSON.parse(e.target.result);
+
+          if (!Array.isArray(parsed.decks) || !parsed.settings || typeof parsed.settings !== 'object') {
+            throw new Error('Invalid backup file');
+          }
+
+          const ok = confirm(
+            (currentLang === 'zh' || currentLang === 'zh-TW')
+              ? '导入这个 JSON 备份？当前数据会被替换。'
+              : 'Import this JSON backup? Your current data will be replaced.'
+          );
+          if (!ok) return;
+
+          saveAutoVersion('before-json-import');
+
+          decks = parsed.decks || [];
+          globalSettings = parsed.settings || globalSettings;
+          currentLang = parsed.lang || currentLang;
+
+          localStorage.setItem('aoe_decks', JSON.stringify(decks));
+          localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
+          localStorage.setItem('aoe_lang', currentLang);
+
+          saveAutoVersion('json-import');
+
+          hideSettingsModal();
+          applyTextSize();
+          updateNav();
+          render(0);
+
+          if (currentDeckId && decks.find(d => d.id === currentDeckId)) {
+            openDeck(currentDeckId);
+          } else {
+            currentDeckId = null;
+          }
+
+          alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '✅ JSON 导入成功' : '✅ JSON imported successfully.');
+        } catch (err) {
+          console.error(err);
+          alert((currentLang === 'zh' || currentLang === 'zh-TW') ? 'JSON 导入失败。' : 'JSON import failed.');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function restoreLocalVersion(versionId) {
+      const versions = getLocalVersions();
       const version = versions.find(v => v.id === versionId);
       if (!version) {
-        alert(currentLang === 'zh' || currentLang === 'zh-TW' ? '找不到该版本。' : 'Version not found.');
+        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '找不到该版本。' : 'Version not found.');
         return;
       }
 
@@ -341,7 +425,7 @@
         localStorage.setItem('aoe_lang', currentLang);
 
         isRestoringVersion = false;
-        saveAutoVersion('restore-version');
+        saveAutoVersion('restore-local-version');
 
         hideSettingsModal();
         applyTextSize();
@@ -358,128 +442,52 @@
       } catch (e) {
         isRestoringVersion = false;
         console.error(e);
-        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '恢复失败。' : 'Failed to restore version.');
+        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '恢复失败。' : 'Restore failed.');
       }
     }
 
-    function exportDataAsJSON() {
+    function formatVersionTime(ts) {
       try {
-        const payload = createSavePayload();
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        a.href = url;
-        a.download = `aoe-flashcards-backup-${stamp}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        saveAutoVersion('export-json');
+        return new Date(ts).toLocaleString();
       } catch (e) {
-        console.error(e);
-        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '导出失败。' : 'Export failed.');
+        return String(ts);
       }
-    }
-
-    function triggerImportJSON() {
-      let input = document.getElementById('json-import-file');
-      if (!input) {
-        input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json,application/json';
-        input.id = 'json-import-file';
-        input.style.display = 'none';
-        document.body.appendChild(input);
-      }
-
-      input.value = '';
-      input.onchange = () => importDataFromJSON(input);
-      input.click();
-    }
-
-    function importDataFromJSON(input) {
-      const file = input.files && input.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const parsed = JSON.parse(e.target.result);
-
-          if (!Array.isArray(parsed.decks) || !parsed.settings || typeof parsed.settings !== 'object') {
-            throw new Error('Invalid JSON backup format');
-          }
-
-          const ok = confirm(
-            (currentLang === 'zh' || currentLang === 'zh-TW')
-              ? '导入这个 JSON 备份？当前数据会被替换。'
-              : 'Import this JSON backup? Your current data will be replaced.'
-          );
-          if (!ok) return;
-
-          saveAutoVersion('before-import-json');
-
-          decks = parsed.decks || [];
-          globalSettings = parsed.settings || globalSettings;
-          currentLang = parsed.lang || currentLang;
-
-          localStorage.setItem('aoe_decks', JSON.stringify(decks));
-          localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
-          localStorage.setItem('aoe_lang', currentLang);
-
-          saveAutoVersion('import-json');
-
-          hideSettingsModal();
-          applyTextSize();
-          updateNav();
-          render(0);
-
-          if (currentDeckId && decks.find(d => d.id === currentDeckId)) {
-            openDeck(currentDeckId);
-          } else {
-            currentDeckId = null;
-          }
-
-          alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '✅ JSON 导入成功' : '✅ JSON imported successfully.');
-        } catch (err) {
-          console.error(err);
-          alert((currentLang === 'zh' || currentLang === 'zh-TW') ? 'JSON 导入失败。' : 'JSON import failed.');
-        }
-      };
-      reader.readAsText(file);
     }
 
     function renderBackupTools() {
-      const container = document.getElementById('backup-tools-container');
+      let container = document.getElementById('backup-tools-container');
       if (!container) return;
 
-      const versions = getSaveVersions();
+      const versions = getLocalVersions();
+      let versionsHTML = '';
 
-      const listHtml = versions.length
-        ? versions.map(v => `
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #e2e8f0;">
-            <div style="flex:1;min-width:0;">
-              <div style="font-weight:600;font-size:14px;">${formatVersionTime(v.timestamp)}</div>
-              <div style="color:#64748b;font-size:13px;">${v.deckCount} decks • ${v.cardCount} cards • ${v.reason}</div>
+      if (versions.length === 0) {
+        versionsHTML = '<div style="color:#64748b;font-size:14px;">No saved local versions yet.</div>';
+      } else {
+        versionsHTML = versions.map(v => {
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #e2e8f0;">
+              <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;font-size:14px;">${formatVersionTime(v.timestamp)}</div>
+                <div style="color:#64748b;font-size:13px;">${v.deckCount} decks • ${v.cardCount} cards • ${v.reason}</div>
+              </div>
+              <button onclick="restoreLocalVersion('${v.id}')" class="btn" style="background:#e2e8f0;padding:10px 16px;">Restore</button>
             </div>
-            <button onclick="restoreSaveVersion('${v.id}')" class="btn" style="background:#e2e8f0;padding:10px 16px;">Restore</button>
-          </div>
-        `).join('')
-        : `<div style="color:#64748b;font-size:14px;">No saved local versions yet.</div>`;
+          `;
+        }).join('');
+      }
 
       container.innerHTML = `
         <div style="margin-top:28px;border-top:1px solid #e2e8f0;padding-top:24px;">
           <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;">Backup & Save</h3>
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-            <button onclick="exportDataAsJSON()" class="btn" style="background:#e2e8f0;">Export JSON</button>
-            <button onclick="triggerImportJSON()" class="btn" style="background:#e2e8f0;">Import JSON</button>
+            <button onclick="exportJSONBackup()" class="btn" style="background:#e2e8f0;">Export JSON</button>
+            <button onclick="triggerJSONImport()" class="btn" style="background:#e2e8f0;">Import JSON</button>
           </div>
           <div style="background:#f8fafc;border-radius:16px;padding:16px;">
             <div style="font-weight:600;margin-bottom:8px;">Auto-saved local versions</div>
             <div style="color:#64748b;font-size:13px;margin-bottom:8px;">Newest ${AUTO_SAVE_MAX_VERSIONS} versions are stored on this device.</div>
-            ${listHtml}
+            ${versionsHTML}
           </div>
         </div>
       `;
@@ -526,9 +534,8 @@
 
     function navigateTo(tab) {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-      const activeBtn = document.getElementById(`nav-${tab}`);
-      if (activeBtn) activeBtn.classList.add('active');
-
+      const active = document.getElementById(`nav-${tab}`);
+      if (active) active.classList.add('active');
       if (tab === 4) showSettingsModal();
       else if (tab === 1) showCreateDeckModal();
       else render(tab);
@@ -615,7 +622,8 @@
       }
     }
 
-    function updateHalfYearButtonPreview() {}
+    function updateHalfYearButtonPreview() {
+    }
 
     function startGlobalReview() {
       let reviewCards = [];
@@ -656,11 +664,10 @@
       const limit = globalSettings.newWordsPerDay;
       const newIntroduced = currentStudySession.newCount || 0;
 
-      if (
-        currentStudySession.cards[currentStudySession.index] &&
-        currentStudySession.cards[currentStudySession.index].section === 1 &&
-        newIntroduced >= limit
-      ) {
+      if (currentStudySession.cards[currentStudySession.index] &&
+          currentStudySession.cards[currentStudySession.index].section === 1 &&
+          newIntroduced >= limit) {
+
         const msg = `You've reached your daily word limit of ${limit}!\n\nContinue anyway?`;
         if (!confirm(msg)) {
           hideStudyModal();
@@ -677,7 +684,7 @@
       const s = currentStudySession;
       const card = s.cards[s.index];
       const deck = decks.find(d => d.id === s.deckId);
-      if (!deck) return;
+      if (!card || !deck) return;
 
       document.getElementById('study-deck-name').textContent = deck.name;
       document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
@@ -721,24 +728,22 @@
     }
 
     function startStudySession(mode) {
-      if (mode === 'mature' && !globalSettings.halfYearMatureReview) return;
-
+      if (mode === 'mature' && !globalSettings.halfYearMatureReview) {
+        return;
+      }
       hideDeckDetailModal();
       const deck = decks.find(d => d.id === currentDeckId);
       if (!deck || !deck.cards || deck.cards.length === 0) return alert('No cards yet');
 
       let sessionCards = [];
       if (mode === 'mature' && globalSettings.halfYearMatureReview) {
-        sessionCards = deck.cards
-          .filter(c => c.section === globalSettings.numSections)
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 15);
+        sessionCards = deck.cards.filter(c => c.section === globalSettings.numSections).sort(() => Math.random() - 0.5).slice(0, 15);
       } else {
         sessionCards = deck.cards.filter(c => {
           if (c.section === 1) return true;
           if (!c.lastReviewed) return true;
           const days = getDaysSince(c.lastReviewed);
-          return days >= (globalSettings.intervals[c.section - 1] || 3);
+          return days >= (globalSettings.intervals[c.section-1] || 3);
         });
       }
 
@@ -823,18 +828,14 @@
     function saveNewDeck() {
       const title = document.getElementById('deck-title').value.trim();
       if (!title) return alert('Deck title is required');
-
       decks.push({
         id: generateId(),
         name: title,
         description: document.getElementById('deck-desc').value.trim(),
         newPerDay: parseInt(document.getElementById('new-per-day').value) || globalSettings.newWordsPerDay,
         cards: [],
-        color: document.querySelector('.color-dot.selected')
-          ? document.querySelector('.color-dot.selected').style.background
-          : '#6d28d9'
+        color: document.querySelector('.color-dot.selected') ? document.querySelector('.color-dot.selected').style.background : '#6d28d9'
       });
-
       saveData('create-deck');
       hideCreateDeckModal();
       render(0);
@@ -860,8 +861,7 @@
         let label = '';
         if (i === 1) label = getText('section_new');
         else if (i === globalSettings.numSections) label = getText('section_done');
-        else label = getText('section_review', globalSettings.intervals[i - 1] || 0);
-
+        else label = getText('section_review', globalSettings.intervals[i-1] || 0);
         statsHTML += `<div class="section-pill"><div style="font-size:28px;font-weight:700;">${count}</div><div style="font-size:13px;">${label}</div></div>`;
       }
       document.getElementById('section-stats').innerHTML = statsHTML;
@@ -878,8 +878,8 @@
           </div>
         </div>
       `).join('') || `<p style="color:#64748b;text-align:center;padding:40px;">No cards in this deck yet</p>`;
-
       document.getElementById('card-list').innerHTML = listHTML;
+
       document.getElementById('deck-detail-modal').style.display = 'flex';
       updateHalfYearButton();
     }
@@ -900,8 +900,8 @@
       const deck = decks.find(d => d.id === currentDeckId);
       const card = deck && deck.cards ? deck.cards.find(c => c.id === cardId) : null;
       if (!card) return;
-
       currentEditCardId = cardId;
+
       document.getElementById('edit-front').value = card.front || '';
       document.getElementById('edit-back').value = card.back || '';
 
@@ -984,12 +984,10 @@
         btn.innerHTML = getText('live_record');
         return;
       }
-
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         editMediaRecorder = new MediaRecorder(stream);
         editAudioChunks = [];
-
         editMediaRecorder.ondataavailable = e => editAudioChunks.push(e.data);
         editMediaRecorder.onstop = () => {
           const blob = new Blob(editAudioChunks, { type: 'audio/webm' });
@@ -1002,11 +1000,10 @@
           };
           reader.readAsDataURL(blob);
         };
-
         editMediaRecorder.start();
         isEditRecording = true;
         btn.textContent = '⏹ Stop Recording';
-      } catch (e) {
+      } catch(e) {
         alert('Microphone permission required for live recording');
       }
     }
@@ -1041,7 +1038,6 @@
       if (!confirm(getText('delete'))) return;
       const deck = decks.find(d => d.id === currentDeckId);
       if (!deck) return;
-
       deck.cards = deck.cards.filter(c => c.id !== cardId);
       saveData('delete-card');
       openDeck(currentDeckId);
@@ -1094,12 +1090,10 @@
         btn.innerHTML = getText('live_record');
         return;
       }
-
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream);
         audioChunks = [];
-
         mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
         mediaRecorder.onstop = () => {
           const blob = new Blob(audioChunks, { type: 'audio/webm' });
@@ -1111,11 +1105,10 @@
           };
           reader.readAsDataURL(blob);
         };
-
         mediaRecorder.start();
         isRecording = true;
         btn.textContent = '⏹ Stop Recording';
-      } catch (e) {
+      } catch(e) {
         alert('Microphone permission required for live recording');
       }
     }
@@ -1137,7 +1130,6 @@
         section: 1,
         lastReviewed: null
       });
-
       saveData('add-card');
       hideAddCardModal();
       openDeck(currentDeckId);
@@ -1153,11 +1145,7 @@
       fileInput.value = '';
 
       const label = document.getElementById('import-file-label');
-      if (label) {
-        label.textContent = (currentLang === 'zh' || currentLang === 'zh-TW')
-          ? '選擇 .apkg 檔案'
-          : 'Select your .apkg / .colpkg / .ofc file';
-      }
+      if (label) label.textContent = (currentLang === 'zh' || currentLang === 'zh-TW') ? '選擇 .apkg 檔案' : 'Select your .apkg / .colpkg / .ofc file';
     }
 
     function hideImportModal() {
@@ -1210,7 +1198,7 @@
               const ext = (realFilename.split('.').pop() || '').toLowerCase();
               let mime = 'application/octet-stream';
               if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
+              else if (['mp3','ogg','wav','m4a','aac','flac','opus'].includes(ext)) mime = 'audio/';
               else if (['mp4','webm'].includes(ext)) mime = 'video/';
               const dataUrl = `data:${mime}${ext};base64,${data}`;
               mediaMap[indexStr] = dataUrl;
@@ -1221,9 +1209,8 @@
 
         if (Object.keys(mediaMap).length === 0) {
           const mediaFiles = Object.keys(zip.files).filter(name =>
-            name.match(/^\d+$/) || name.match(/\.(jpg|png|gif|mp3|ogg|wav|mp4|webm)$/i)
+            name.match(/^\d+$/) || name.match(/\.(jpg|jpeg|png|gif|mp3|ogg|wav|m4a|aac|flac|opus|mp4|webm)$/i)
           );
-
           for (const fname of mediaFiles) {
             const entry = zip.file(fname);
             if (entry) {
@@ -1231,7 +1218,7 @@
               const ext = (fname.split('.').pop() || '').toLowerCase();
               let mime = 'application/octet-stream';
               if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
+              else if (['mp3','ogg','wav','m4a','aac','flac','opus'].includes(ext)) mime = 'audio/';
               else if (['mp4','webm'].includes(ext)) mime = 'video/';
               const dataUrl = `data:${mime}${ext};base64,${data}`;
               mediaMap[fname] = dataUrl;
@@ -1254,7 +1241,7 @@
           Object.keys(mediaMap).forEach(key => {
             const dataUrl = mediaMap[key];
 
-            const imgRegex = new RegExp(`<img[^>]*src=["']${key}["'][^>]*>`, 'gi');
+            const imgRegex = new RegExp(`<img[^>]*src=["']${escapeRegex(key)}["'][^>]*>`, 'gi');
             if (imgRegex.test(front)) {
               cardImage = dataUrl;
               front = front.replace(imgRegex, '').trim();
@@ -1264,7 +1251,7 @@
               back = back.replace(imgRegex, '').trim();
             }
 
-            const soundRegex = new RegExp(`\\[sound:${key}\\]`, 'gi');
+            const soundRegex = new RegExp(`\\[sound:${escapeRegex(key)}\\]`, 'gi');
             if (soundRegex.test(front)) {
               cardMedia = dataUrl;
               front = front.replace(soundRegex, '').trim();
@@ -1274,6 +1261,9 @@
               back = back.replace(soundRegex, '').trim();
             }
           });
+
+          front = cleanupImportedText(front);
+          back = cleanupImportedText(back);
 
           importedCards.push({
             id: generateId(),
@@ -1309,10 +1299,23 @@
           if (newDeck.id) openDeck(newDeck.id);
         }, 1500);
 
-      } catch (e) {
+      } catch(e) {
         console.error("Import error:", e);
         status.innerHTML += `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
       }
+    }
+
+    function escapeRegex(str) {
+      return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function cleanupImportedText(text) {
+      return String(text || '')
+        .replace(/\[sound:[^\]]+\]/gi, '')
+        .replace(/\[\s*\]/g, '')
+        .replace(/<div><\/div>/gi, '')
+        .replace(/<br\s*\/?>\s*<br\s*\/?>/gi, '<br>')
+        .trim();
     }
 
     function showSettingsModal() {
@@ -1348,7 +1351,8 @@
       if (!backupContainer) {
         backupContainer = document.createElement('div');
         backupContainer.id = 'backup-tools-container';
-        document.getElementById('save-settings-btn').insertAdjacentElement('beforebegin', backupContainer);
+        const saveBtn = document.getElementById('save-settings-btn');
+        saveBtn.parentNode.insertBefore(backupContainer, saveBtn);
       }
 
       renderBackupTools();
@@ -1391,12 +1395,10 @@
     function init() {
       loadData();
       updateNav();
-
       if (decks.length === 0) {
         decks.push({ id: generateId(), name: "Demo Deck", description: "Your first deck", newPerDay: 20, cards: [] });
-        saveData('init-demo-deck');
+        saveData('init-demo');
       }
-
       applyTextSize();
       navigateTo(0);
       saveAutoVersion('app-open');
