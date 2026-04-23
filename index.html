@@ -531,7 +531,6 @@
       return text;
     }
 
-    // === MINIMAL CHANGE: Use midnight-to-midnight (12 AM to next 12 AM) ===
     function getDaysSince(lastReviewed) {
       if (!lastReviewed) return Infinity;
       const now = new Date();
@@ -547,7 +546,7 @@
 
     async function initSQL() {
       if (SQL) return;
-      const config = { locateFile: file => `./${file}` };
+      const config = { locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` };
       SQL = await initSqlJs(config);
     }
 
@@ -607,7 +606,8 @@
 
     function navigateTo(tab) {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-      document.getElementById(`nav-${tab}`).classList.add('active');
+      const active = document.getElementById(`nav-${tab}`);
+      if (active) active.classList.add('active');
       if (tab === 4) showSettingsModal();
       else if (tab === 1) showCreateDeckModal();
       else render(tab);
@@ -680,7 +680,7 @@
     function updateHalfYearButton() {
       const btn = document.getElementById('half-year-btn');
       if (!btn) return;
-      
+
       if (globalSettings.halfYearMatureReview) {
         btn.classList.remove('btn-disabled');
         btn.style.background = '#e2e8f0';
@@ -695,7 +695,6 @@
     }
 
     function updateHalfYearButtonPreview() {
-      // For live preview in settings
     }
 
     function startGlobalReview() {
@@ -722,10 +721,10 @@
       }
 
       currentDeckId = targetDeckId;
-      currentStudySession = { 
-        cards: reviewCards.sort(() => Math.random() - 0.5), 
-        index: 0, 
-        mode: "normal", 
+      currentStudySession = {
+        cards: reviewCards.sort(() => Math.random() - 0.5),
+        index: 0,
+        mode: "normal",
         deckId: targetDeckId,
         newCount: 0
       };
@@ -737,10 +736,10 @@
       const limit = globalSettings.newWordsPerDay;
       const newIntroduced = currentStudySession.newCount || 0;
 
-      if (currentStudySession.cards[currentStudySession.index] && 
-          currentStudySession.cards[currentStudySession.index].section === 1 && 
+      if (currentStudySession.cards[currentStudySession.index] &&
+          currentStudySession.cards[currentStudySession.index].section === 1 &&
           newIntroduced >= limit) {
-        
+
         const msg = `You've reached your daily word limit of ${limit}!\n\nContinue anyway?`;
         if (!confirm(msg)) {
           hideStudyModal();
@@ -756,8 +755,10 @@
 
       const s = currentStudySession;
       const card = s.cards[s.index];
+      const deck = decks.find(d => d.id === s.deckId);
+      if (!card || !deck) return;
 
-      document.getElementById('study-deck-name').textContent = decks.find(d => d.id === s.deckId).name;
+      document.getElementById('study-deck-name').textContent = deck.name;
       document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
 
       if (card.section === 1) {
@@ -765,14 +766,30 @@
       }
 
       document.getElementById('front-text').innerHTML = card.front || '';
-      const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
-      const fAud = document.getElementById('front-audio'); fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) fAud.src = card.media;
-      const fVid = document.getElementById('front-video'); fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) fVid.src = card.media;
+      const fImg = document.getElementById('front-image');
+      fImg.style.display = card.image ? 'block' : 'none';
+      if (card.image) fImg.src = card.image;
+
+      const fAud = document.getElementById('front-audio');
+      fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none';
+      if (card.media && card.media.includes('audio')) fAud.src = card.media;
+
+      const fVid = document.getElementById('front-video');
+      fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none';
+      if (card.media && card.media.includes('video')) fVid.src = card.media;
 
       document.getElementById('back-text').innerHTML = card.back || '';
-      const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
-      const bAud = document.getElementById('back-audio'); bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) bAud.src = card.media;
-      const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
+      const bImg = document.getElementById('back-image');
+      bImg.style.display = card.image ? 'block' : 'none';
+      if (card.image) bImg.src = card.image;
+
+      const bAud = document.getElementById('back-audio');
+      bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none';
+      if (card.media && card.media.includes('audio')) bAud.src = card.media;
+
+      const bVid = document.getElementById('back-video');
+      bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none';
+      if (card.media && card.media.includes('video')) bVid.src = card.media;
 
       document.getElementById('flashcard').classList.remove('flipped');
       document.getElementById('rating-buttons').style.display = 'grid';
@@ -788,7 +805,7 @@
       }
       hideDeckDetailModal();
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
+      if (!deck || !deck.cards || deck.cards.length === 0) return alert('No cards yet');
 
       let sessionCards = [];
       if (mode === 'mature' && globalSettings.halfYearMatureReview) {
@@ -804,10 +821,10 @@
 
       if (sessionCards.length === 0) return alert('No cards are due right now.');
 
-      currentStudySession = { 
-        cards: sessionCards, 
-        index: 0, 
-        mode, 
+      currentStudySession = {
+        cards: sessionCards,
+        index: 0,
+        mode,
         deckId: currentDeckId,
         newCount: 0
       };
@@ -846,8 +863,8 @@
       }
     }
 
-    function hideStudyModal() { 
-      document.getElementById('study-modal').style.display = 'none'; 
+    function hideStudyModal() {
+      document.getElementById('study-modal').style.display = 'none';
     }
 
     function showCreateDeckModal() {
@@ -863,7 +880,10 @@
       document.getElementById('create-btn').textContent = getText('create_deck_btn');
       renderColorPicker();
     }
-    function hideCreateDeckModal() { document.getElementById('create-deck-modal').style.display = 'none'; }
+
+    function hideCreateDeckModal() {
+      document.getElementById('create-deck-modal').style.display = 'none';
+    }
 
     function renderColorPicker() {
       const colors = ['#6d28d9','#a855f7','#ec4899','#ef4444','#f59e0b','#10b981','#14b8a6','#3b82f6'];
@@ -871,6 +891,7 @@
       colors.forEach((c,i) => html += `<div class="color-dot" style="background:${c}" onclick="selectColor(this)" data-index="${i}"></div>`);
       document.getElementById('color-picker').innerHTML = html;
     }
+
     function selectColor(el) {
       document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('selected'));
       el.classList.add('selected');
@@ -895,6 +916,8 @@
     function openDeck(id) {
       currentDeckId = id;
       const deck = decks.find(d => d.id === id);
+      if (!deck) return;
+
       document.getElementById('deck-name-detail').innerHTML = `<span style="background:${deck.color};color:white;padding:4px 12px;border-radius:9999px;font-size:14px;">${deck.name}</span>`;
       document.getElementById('deck-desc-detail').textContent = deck.description || 'No description';
       document.getElementById('delete-deck-btn').textContent = getText('delete_deck');
@@ -933,7 +956,9 @@
       updateHalfYearButton();
     }
 
-    function hideDeckDetailModal() { document.getElementById('deck-detail-modal').style.display = 'none'; }
+    function hideDeckDetailModal() {
+      document.getElementById('deck-detail-modal').style.display = 'none';
+    }
 
     function deleteCurrentDeck() {
       if (!confirm(getText('delete_deck'))) return;
@@ -945,7 +970,7 @@
 
     function editCard(cardId) {
       const deck = decks.find(d => d.id === currentDeckId);
-      const card = deck.cards.find(c => c.id === cardId);
+      const card = deck && deck.cards ? deck.cards.find(c => c.id === cardId) : null;
       if (!card) return;
       currentEditCardId = cardId;
 
@@ -1050,8 +1075,8 @@
         editMediaRecorder.start();
         isEditRecording = true;
         btn.textContent = '⏹ Stop Recording';
-      } catch(e) { 
-        alert('Microphone permission required for live recording'); 
+      } catch(e) {
+        alert('Microphone permission required for live recording');
       }
     }
 
@@ -1069,7 +1094,7 @@
 
     function saveEditedCard() {
       const deck = decks.find(d => d.id === currentDeckId);
-      const card = deck.cards.find(c => c.id === currentEditCardId);
+      const card = deck && deck.cards ? deck.cards.find(c => c.id === currentEditCardId) : null;
       if (card) {
         card.front = document.getElementById('edit-front').value.trim();
         card.back = document.getElementById('edit-back').value.trim();
@@ -1084,6 +1109,7 @@
     function deleteCard(cardId) {
       if (!confirm(getText('delete'))) return;
       const deck = decks.find(d => d.id === currentDeckId);
+      if (!deck) return;
       deck.cards = deck.cards.filter(c => c.id !== cardId);
       saveData();
       openDeck(currentDeckId);
@@ -1105,7 +1131,10 @@
       document.getElementById('upload-btn-add').textContent = getText('upload');
       document.getElementById('save-card-btn').textContent = getText('save_changes');
     }
-    function hideAddCardModal() { document.getElementById('add-card-modal').style.display = 'none'; }
+
+    function hideAddCardModal() {
+      document.getElementById('add-card-modal').style.display = 'none';
+    }
 
     function previewImage(input) {
       const file = input.files[0];
@@ -1141,8 +1170,8 @@
         mediaRecorder.onstop = () => {
           const blob = new Blob(audioChunks, { type: 'audio/webm' });
           const reader = new FileReader();
-          reader.onload = e => { 
-            currentMedia = e.target.result; 
+          reader.onload = e => {
+            currentMedia = e.target.result;
             const audio = new Audio(currentMedia);
             audio.play().catch(() => {});
           };
@@ -1151,8 +1180,8 @@
         mediaRecorder.start();
         isRecording = true;
         btn.textContent = '⏹ Stop Recording';
-      } catch(e) { 
-        alert('Microphone permission required for live recording'); 
+      } catch(e) {
+        alert('Microphone permission required for live recording');
       }
     }
 
@@ -1162,6 +1191,8 @@
       if (!front || !back) return alert('Front and back are required');
 
       const deck = decks.find(d => d.id === currentDeckId);
+      if (!deck) return;
+
       deck.cards.push({
         id: generateId(),
         front: front,
@@ -1181,16 +1212,48 @@
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
       document.getElementById('import-status').innerHTML = '';
-      
+
       const fileInput = document.getElementById('import-file');
       fileInput.value = '';
-      
+
       const label = document.getElementById('import-file-label');
       if (label) label.textContent = (currentLang === 'zh' || currentLang === 'zh-TW') ? '選擇 .apkg 檔案' : 'Select your .apkg / .colpkg / .ofc file';
     }
 
     function hideImportModal() {
       document.getElementById('import-modal').style.display = 'none';
+    }
+
+    function escapeRegex(str) {
+      return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function cleanupImportedText(text) {
+      return String(text || '')
+        .replace(/\[sound:[^\]]+\]/gi, '')
+        .replace(/\[\s*\]/g, '')
+        .replace(/<div><\/div>/gi, '')
+        .replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>')
+        .trim();
+    }
+
+    function getMimeTypeFromExt(filename) {
+      const ext = String(filename.split('.').pop() || '').toLowerCase();
+      if (['jpg', 'jpeg'].includes(ext)) return 'image/jpeg';
+      if (ext === 'png') return 'image/png';
+      if (ext === 'gif') return 'image/gif';
+      if (ext === 'webp') return 'image/webp';
+      if (ext === 'svg') return 'image/svg+xml';
+      if (ext === 'mp3') return 'audio/mpeg';
+      if (ext === 'ogg') return 'audio/ogg';
+      if (ext === 'wav') return 'audio/wav';
+      if (ext === 'm4a') return 'audio/mp4';
+      if (ext === 'aac') return 'audio/aac';
+      if (ext === 'flac') return 'audio/flac';
+      if (ext === 'opus') return 'audio/opus';
+      if (ext === 'mp4') return 'video/mp4';
+      if (ext === 'webm') return 'video/webm';
+      return 'application/octet-stream';
     }
 
     async function handleImportFile(input) {
@@ -1225,50 +1288,63 @@
           throw new Error('This appears to be a dummy database. Please re-export from Anki with "Support older Anki versions" checked.');
         }
 
-        const mediaMap = {};
+        status.innerHTML = `<p>📦 Reading media map...</p>`;
 
+        const mediaFilenameMap = {};
         const mediaJsonFile = zip.file('media');
         if (mediaJsonFile) {
           const mediaJsonText = await mediaJsonFile.async('string');
-          const mediaFilenameMap = JSON.parse(mediaJsonText);
-
-          for (const [indexStr, realFilename] of Object.entries(mediaFilenameMap)) {
-            const entry = zip.file(indexStr);
-            if (entry) {
-              const data = await entry.async('base64');
-              const ext = (realFilename.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
-              mediaMap[indexStr] = dataUrl;
-              mediaMap[realFilename] = dataUrl;
-            }
-          }
+          const parsedMediaJson = JSON.parse(mediaJsonText);
+          Object.entries(parsedMediaJson).forEach(([indexStr, realFilename]) => {
+            mediaFilenameMap[indexStr] = realFilename;
+            mediaFilenameMap[realFilename] = indexStr;
+          });
         }
 
-        if (Object.keys(mediaMap).length === 0) {
-          const mediaFiles = Object.keys(zip.files).filter(name => 
-            name.match(/^\d+$/) || name.match(/\.(jpg|png|gif|mp3|ogg|wav|mp4|webm)$/i)
-          );
-          for (const fname of mediaFiles) {
-            const entry = zip.file(fname);
-            if (entry) {
-              const data = await entry.async('base64');
-              const ext = (fname.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
-              mediaMap[fname] = dataUrl;
+        const mediaDataUrlCache = new Map();
+
+        async function getMediaDataUrlByName(requestedName) {
+          if (!requestedName) return null;
+
+          const normalizedName = String(requestedName).trim();
+          if (!normalizedName) return null;
+
+          if (mediaDataUrlCache.has(normalizedName)) {
+            return mediaDataUrlCache.get(normalizedName);
+          }
+
+          let entry = zip.file(normalizedName);
+          let actualFilename = normalizedName;
+
+          if (!entry && mediaFilenameMap[normalizedName] != null) {
+            const mapped = String(mediaFilenameMap[normalizedName]);
+            entry = zip.file(mapped);
+            if (entry) actualFilename = normalizedName;
+          }
+
+          if (!entry) {
+            const reverseMapped = mediaFilenameMap[normalizedName];
+            if (reverseMapped != null) {
+              entry = zip.file(String(reverseMapped));
+              if (entry) actualFilename = normalizedName;
             }
           }
+
+          if (!entry) {
+            mediaDataUrlCache.set(normalizedName, null);
+            return null;
+          }
+
+          const base64Data = await entry.async('base64');
+          const mime = getMimeTypeFromExt(actualFilename);
+          const dataUrl = `data:${mime};base64,${base64Data}`;
+          mediaDataUrlCache.set(normalizedName, dataUrl);
+          return dataUrl;
         }
 
         const notesStmt = db.prepare("SELECT flds FROM notes");
         const importedCards = [];
+        let processed = 0;
 
         while (notesStmt.step()) {
           const row = notesStmt.get();
@@ -1279,39 +1355,54 @@
           let cardImage = null;
           let cardMedia = null;
 
-          Object.keys(mediaMap).forEach(key => {
-            const dataUrl = mediaMap[key];
+          const combined = `${front}\n${back}`;
 
-            const imgRegex = new RegExp(`<img[^>]*src=["']${key}["'][^>]*>`, 'gi');
-            if (imgRegex.test(front)) {
-              cardImage = dataUrl;
+          const soundMatches = [...combined.matchAll(/\[sound:([^\]]+)\]/gi)].map(m => m[1]);
+          const imgMatches = [...combined.matchAll(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi)].map(m => m[1]);
+
+          if (imgMatches.length > 0) {
+            const firstImageName = imgMatches[0];
+            const imageUrl = await getMediaDataUrlByName(firstImageName);
+            if (imageUrl) cardImage = imageUrl;
+
+            for (const imgName of imgMatches) {
+              const imgRegex = new RegExp(`<img[^>]*src=["']${escapeRegex(imgName)}["'][^>]*>`, 'gi');
               front = front.replace(imgRegex, '').trim();
-            }
-            if (imgRegex.test(back)) {
-              cardImage = dataUrl;
               back = back.replace(imgRegex, '').trim();
             }
+          }
 
-            const soundRegex = new RegExp(`\\[sound:${key}\\]`, 'gi');
-            if (soundRegex.test(front)) {
-              cardMedia = dataUrl;
+          if (soundMatches.length > 0) {
+            const firstSoundName = soundMatches[0];
+            const mediaUrl = await getMediaDataUrlByName(firstSoundName);
+            if (mediaUrl) cardMedia = mediaUrl;
+
+            for (const soundName of soundMatches) {
+              const soundRegex = new RegExp(`\\[sound:${escapeRegex(soundName)}\\]`, 'gi');
               front = front.replace(soundRegex, '').trim();
-            }
-            if (soundRegex.test(back)) {
-              cardMedia = dataUrl;
               back = back.replace(soundRegex, '').trim();
             }
-          });
+          }
+
+          front = cleanupImportedText(front);
+          back = cleanupImportedText(back);
 
           importedCards.push({
             id: generateId(),
-            front: front,
-            back: back,
+            front,
+            back,
             image: cardImage,
             media: cardMedia,
             section: 1,
             lastReviewed: null
           });
+
+          processed++;
+
+          if (processed % 25 === 0) {
+            status.innerHTML = `<p>📦 Importing notes... ${processed} cards processed</p>`;
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
         }
 
         notesStmt.free();
@@ -1329,17 +1420,17 @@
         decks.push(newDeck);
         saveData();
 
-        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
-        
+        status.innerHTML = `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
+
         setTimeout(() => {
           hideImportModal();
           render(0);
           if (newDeck.id) openDeck(newDeck.id);
-        }, 1500);
+        }, 800);
 
       } catch(e) {
         console.error("Import error:", e);
-        status.innerHTML += `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
+        status.innerHTML = `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
       }
     }
 
@@ -1378,7 +1469,9 @@
       };
     }
 
-    function hideSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
+    function hideSettingsModal() {
+      document.getElementById('settings-modal').style.display = 'none';
+    }
 
     function saveSettings() {
       globalSettings.newWordsPerDay = parseInt(document.getElementById('global-new-per-day').value) || 20;
@@ -1397,7 +1490,7 @@
       applyTextSize();
       updateNav();
       render(0);
-      
+
       if (currentDeckId) {
         openDeck(currentDeckId);
       }
@@ -1418,11 +1511,11 @@
 
     window.addEventListener('load', () => {
       const importFileInput = document.getElementById('import-file');
-      if (importFileInput) importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
+      if (importFileInput) {
+        importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
+      }
       init();
     });
-
-    window.onload = init;
-  </script>
+</script>
 </body>
 </html>
