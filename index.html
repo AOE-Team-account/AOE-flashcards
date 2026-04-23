@@ -1,3 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AOE flashcards">
+  <link rel="apple-touch-icon" href="AOE_flashcards_icon.png">
+
+  <title>AOE flashcards</title>
+  
+  <script src="./jszip.min.js"></script>
+  <script src="./sql-wasm.min.js"></script>
+  
+  <style>
+    :root { --primary: #6d28d9; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f8fafc;
+      color: #1e2937;
+      min-height: 100vh;
+      font-size: 17px;
+    }
+    .header {
+      background: white;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 14px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    .logo { font-size: 22px; font-weight: 700; color: var(--primary); letter-spacing: -0.5px; }
+    .nav-btn {
+      padding: 8px 20px;
+      border-radius: 9999px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nav-btn.active { background: var(--primary); color: white; }
+    .container { max-width: 640px; margin: 0 auto; padding: 16px; }
+    .card {
+      background: white;
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+      margin-bottom: 20px;
+    }
+    .btn { 
+      padding: 14px 28px; 
+      border-radius: 9999px; 
+      font-weight: 600; 
+      cursor: pointer; 
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-disabled {
+      background: #e2e8f0 !important;
+      color: #94a3b8 !important;
+      cursor: not-allowed !important;
+    }
+    .modal {
+      position: fixed; inset: 0; background: rgba(15,23,42,0.85);
+      display: none; align-items: flex-end; z-index: 200;
+    }
+    .modal-content {
+      background: white; width: 100%; max-width: 640px;
+      border-radius: 28px 28px 0 0; padding: 28px;
+      max-height: 90vh; overflow-y: auto;
+    }
+    .flashcard {
+      perspective: 1500px; height: 460px; margin: 30px 0; cursor: pointer;
+    }
+    .flashcard-inner {
+      position: relative; width: 100%; height: 100%;
+      transition: transform 0.7s cubic-bezier(0.23,1,0.32,1);
+      transform-style: preserve-3d;
+      border-radius: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.12);
+    }
+    .flipped .flashcard-inner { transform: rotateY(180deg); }
+    .flashcard-face {
+      position: absolute; width: 100%; height: 100%;
+      backface-visibility: hidden;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: white; border-radius: 28px; padding: 40px 32px;
+      border: 1px solid #e2e8f0; text-align: center;
+    }
+    .flashcard-back { transform: rotateY(180deg); }
+    input, textarea, select {
+      width: 100%; padding: 16px 20px; border: 1px solid #cbd5e1;
+      border-radius: 16px; margin-bottom: 16px; font-size: 17px;
+    }
+    .audio-player { width: 100%; margin: 16px 0; }
+    .color-dot {
+      width: 38px; height: 38px; border-radius: 50%; margin: 6px;
+      cursor: pointer; border: 4px solid transparent; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .color-dot.selected { border-color: #1e2937; transform: scale(1.15); }
+    .section-pill {
+      background: #f1f5f9; padding: 12px 18px; border-radius: 9999px;
+      text-align: center; font-size: 15px; font-weight: 600;
+    }
+    .media-preview { max-height: 160px; border-radius: 12px; margin: 12px 0; }
+    .slider-container {
+      margin: 16px 0 24px;
+    }
+    .slider-label {
+      display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">AOE flashcards</div>
+    <div style="display:flex;gap:12px;" id="nav-container"></div>
+  </div>
+
+  <div id="main-content" class="container"></div>
+
+  <!-- CREATE DECK MODAL -->
+  <div id="create-deck-modal" class="modal" onclick="if(event.target.id==='create-deck-modal')hideCreateDeckModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="create-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      <label id="deck-title-label"></label>
+      <input type="text" id="deck-title" placeholder="">
+      <label id="deck-desc-label" style="margin-top:16px;"></label>
+      <input type="text" id="deck-desc" placeholder="">
+      <label id="new-per-day-label" style="margin-top:16px;"></label>
+      <input type="number" id="new-per-day" value="20" min="1">
+      <label id="color-label" style="margin-top:16px;"></label>
+      <div id="color-picker" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
+      <button onclick="saveNewDeck()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;font-size:18px;" id="create-btn"></button>
+    </div>
+  </div>
+
+  <!-- DECK DETAIL MODAL -->
+  <div id="deck-detail-modal" class="modal" onclick="if(event.target.id==='deck-detail-modal')hideDeckDetailModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div id="deck-name-detail" style="font-weight:700;font-size:24px;"></div>
+          <div id="deck-desc-detail" style="color:#64748b;margin-top:4px;"></div>
+        </div>
+        <button onclick="deleteCurrentDeck()" id="delete-deck-btn" style="background:#fee2e2;color:#ef4444;padding:10px 20px;border-radius:9999px;"></button>
+      </div>
+
+      <div id="section-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin:28px 0 24px;"></div>
+
+      <button onclick="startStudySession('normal')" class="btn btn-primary" style="width:100%;padding:18px;font-size:18px;margin-bottom:12px;" id="study-now-btn"></button>
+      <button onclick="startStudySession('mature')" class="btn" style="width:100%;padding:18px;font-size:18px;" id="half-year-btn"></button>
+
+      <div style="margin-top:32px;display:flex;gap:12px;">
+        <button onclick="showAddCardModal()" class="btn" style="flex:1;background:#e2e8f0;" id="add-card-btn"></button>
+        <button onclick="showImportModal()" class="btn" style="flex:1;background:#e2e8f0;" id="import-apkg-btn"></button>
+      </div>
+
+      <h3 id="all-cards-title" style="margin:32px 0 12px;font-weight:600;"></h3>
+      <div id="card-list" style="max-height:400px;overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <!-- EDIT CARD MODAL -->
+  <div id="edit-card-modal" class="modal" onclick="if(event.target.id==='edit-card-modal')hideEditCardModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="edit-card-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      <textarea id="edit-front" rows="3"></textarea>
+      <textarea id="edit-back" rows="3"></textarea>
+
+      <div style="margin-top:24px;border-top:1px solid #e2e8f0;padding-top:20px;">
+        <label id="image-label"></label>
+        <div id="edit-image-preview-container" style="margin:12px 0;"></div>
+        <div style="display:flex;gap:12px;">
+          <input type="file" id="edit-card-image" accept="image/*" onchange="previewEditImage(this)" style="flex:1;">
+          <button onclick="deleteEditImage()" class="btn" style="background:#fee2e2;color:#ef4444;" id="delete-image-btn"></button>
+        </div>
+      </div>
+
+      <div style="margin-top:24px;border-top:1px solid #e2e8f0;padding-top:20px;">
+        <label id="sound-label"></label>
+        <div id="edit-media-preview-container" style="margin:12px 0;"></div>
+        <div style="display:flex;gap:12px;">
+          <button onclick="toggleEditRecording()" id="edit-record-btn" class="btn" style="flex:1;"></button>
+          <input type="file" id="edit-card-media" accept="audio/*,video/*" onchange="previewEditMedia(this)" style="display:none;">
+          <button onclick="document.getElementById('edit-card-media').click()" class="btn" style="flex:1;background:#e2e8f0;" id="upload-btn"></button>
+          <button onclick="deleteEditMedia()" class="btn" style="background:#fee2e2;color:#ef4444;" id="delete-media-btn"></button>
+        </div>
+      </div>
+
+      <button onclick="saveEditedCard()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;font-size:18px;" id="save-changes-btn"></button>
+      <button onclick="hideEditCardModal()" class="btn" style="width:100%;margin-top:12px;background:#e2e8f0;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ADD CARD MODAL -->
+  <div id="add-card-modal" class="modal" onclick="if(event.target.id==='add-card-modal')hideAddCardModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="add-card-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      <textarea id="card-front" rows="3" placeholder=""></textarea>
+      <textarea id="card-back" rows="3" placeholder=""></textarea>
+
+      <div style="margin-top:20px;">
+        <label id="image-label-add"></label>
+        <input type="file" id="card-image" accept="image/*" onchange="previewImage(this)">
+      </div>
+      <div style="margin-top:16px;">
+        <label id="sound-label-add"></label>
+        <div style="display:flex;gap:12px;">
+          <button onclick="toggleRecording()" id="record-btn" class="btn" style="flex:1;"></button>
+          <input type="file" id="card-media" accept="audio/*,video/*" onchange="previewMedia(this)" style="display:none;">
+          <button onclick="document.getElementById('card-media').click()" class="btn" style="flex:1;background:#e2e8f0;" id="upload-btn-add"></button>
+        </div>
+      </div>
+
+      <button onclick="saveCard()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;font-size:18px;" id="save-card-btn"></button>
+    </div>
+  </div>
+
+  <!-- STUDY MODAL -->
+  <div id="study-modal" class="modal" onclick="if(event.target.id==='study-modal')hideStudyModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+        <div id="study-deck-name" style="font-weight:700;font-size:20px;"></div>
+        <div id="study-progress" style="color:#64748b;"></div>
+      </div>
+
+      <div id="flashcard" class="flashcard" onclick="flipCard()">
+        <div id="flashcard-inner" class="flashcard-inner">
+          <div class="flashcard-face" id="front-face">
+            <div id="front-text" style="font-size:26px;font-weight:600;margin-bottom:20px;"></div>
+            <img id="front-image" style="max-height:240px;border-radius:16px;display:none;margin-bottom:16px;">
+            <audio id="front-audio" controls class="audio-player" style="display:none;"></audio>
+            <video id="front-video" controls style="max-height:240px;border-radius:16px;display:none;width:100%;"></video>
+          </div>
+          <div class="flashcard-face flashcard-back" id="back-face">
+            <div id="back-text" style="font-size:26px;font-weight:600;margin-bottom:20px;"></div>
+            <img id="back-image" style="max-height:240px;border-radius:16px;display:none;margin-bottom:16px;">
+            <audio id="back-audio" controls class="audio-player" style="display:none;"></audio>
+            <video id="back-video" controls style="max-height:240px;border-radius:16px;display:none;width:100%;"></video>
+          </div>
+        </div>
+      </div>
+
+      <div id="rating-buttons" style="display:none;margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <button onclick="rateCard(false)" id="wrong-btn" style="background:#fee2e2;color:#b91c1c;padding:18px;font-size:18px;border-radius:9999px;"></button>
+        <button onclick="rateCard(true)" class="btn btn-primary" id="correct-btn" style="padding:18px;font-size:18px;"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMPORT MODAL -->
+  <div id="import-modal" class="modal" onclick="if(event.target.id==='import-modal')hideImportModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="import-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      <p id="import-desc" style="color:#64748b;margin-bottom:16px;"></p>
+      
+      <div style="margin-bottom:20px;">
+        <label style="display:block;margin-bottom:8px;font-weight:600;color:#1e2937;" id="import-file-label"></label>
+        <input type="file" id="import-file" accept=".apkg,.colpkg,.ofc" 
+               style="width:100%; padding:16px; border:2px dashed #cbd5e1; border-radius:16px; font-size:17px; background:#f8fafc;">
+      </div>
+
+      <div id="import-status" style="margin-top:16px;min-height:120px;color:#64748b;font-size:15px;"></div>
+      <button onclick="hideImportModal()" class="btn" style="width:100%;margin-top:20px;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal" onclick="if(event.target.id==='settings-modal')hideSettingsModal()">
+    <div class="modal-content" onclick="event.stopImmediatePropagation()">
+      <h2 id="settings-title" style="font-size:24px;font-weight:700;margin-bottom:24px;"></h2>
+      
+      <label id="global-new-label"></label>
+      <input type="number" id="global-new-per-day" value="20" style="margin-bottom:24px;">
+
+      <label id="num-sections-label" style="margin-bottom:12px;display:block;"></label>
+      <input type="number" id="num-sections" value="5" min="3" max="10" style="margin-bottom:24px;">
+
+      <div id="intervals-container"></div>
+
+      <label id="wrong-section-label" style="margin:24px 0 8px;display:block;"></label>
+      <input type="number" id="wrong-section" value="3" min="2" max="5" style="margin-bottom:24px;">
+
+      <label id="half-year-label" class="flex items-center gap-3">
+        <input type="checkbox" id="half-year-toggle" checked onchange="updateHalfYearButtonPreview()">
+        <span id="half-year-text"></span>
+      </label>
+
+      <div class="slider-container">
+        <div class="slider-label">
+          <span id="text-size-label"></span>
+          <span id="text-size-value" style="font-weight:700;">18px</span>
+        </div>
+        <input type="range" id="text-size-slider" min="14" max="28" value="18" step="1" 
+               style="width:100%; accent-color: var(--primary);">
+      </div>
+
+      <label id="language-label" style="margin:24px 0 8px;display:block;"></label>
+      <select id="language-select" style="width:100%;padding:16px 20px;border:1px solid #cbd5e1;border-radius:16px;">
+        <option value="en">English</option>
+        <option value="zh">简体中文</option>
+        <option value="zh-TW">繁體中文</option>
+      </select>
+
+      <button onclick="saveSettings()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;" id="save-settings-btn"></button>
+    </div>
+  </div>
+
 <script>
     let decks = [];
     let currentDeckId = null;
@@ -24,10 +340,6 @@
       halfYearMatureReview: true,
       textSize: 18
     };
-
-    const AUTO_SAVE_VERSIONS_KEY = 'aoe_save_versions';
-    const AUTO_SAVE_MAX_VERSIONS = 20;
-    let isRestoringVersion = false;
 
     let currentLang = 'en';
     const translations = {
@@ -219,6 +531,7 @@
       return text;
     }
 
+    // === MINIMAL CHANGE: Use midnight-to-midnight (12 AM to next 12 AM) ===
     function getDaysSince(lastReviewed) {
       if (!lastReviewed) return Infinity;
       const now = new Date();
@@ -234,62 +547,8 @@
 
     async function initSQL() {
       if (SQL) return;
-      const config = { locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` };
+      const config = { locateFile: file => `./${file}` };
       SQL = await initSqlJs(config);
-    }
-
-    function buildBackupPayload() {
-      return {
-        version: 1,
-        app: "AOE flashcards",
-        exportedAt: new Date().toISOString(),
-        decks: decks,
-        settings: globalSettings,
-        lang: currentLang
-      };
-    }
-
-    function getLocalVersions() {
-      try {
-        return JSON.parse(localStorage.getItem(AUTO_SAVE_VERSIONS_KEY) || '[]');
-      } catch (e) {
-        return [];
-      }
-    }
-
-    function saveAutoVersion(reason) {
-      if (isRestoringVersion) return;
-
-      try {
-        const payload = buildBackupPayload();
-        const versions = getLocalVersions();
-        const snapshot = JSON.stringify({
-          decks: payload.decks,
-          settings: payload.settings,
-          lang: payload.lang
-        });
-
-        if (versions.length > 0 && versions[0].snapshot === snapshot) return;
-
-        versions.unshift({
-          id: generateId(),
-          timestamp: Date.now(),
-          reason: reason || 'autosave',
-          snapshot: snapshot,
-          deckCount: Array.isArray(payload.decks) ? payload.decks.length : 0,
-          cardCount: Array.isArray(payload.decks)
-            ? payload.decks.reduce((sum, d) => sum + ((d.cards && d.cards.length) || 0), 0)
-            : 0
-        });
-
-        while (versions.length > AUTO_SAVE_MAX_VERSIONS) {
-          versions.pop();
-        }
-
-        localStorage.setItem(AUTO_SAVE_VERSIONS_KEY, JSON.stringify(versions));
-      } catch (e) {
-        console.warn('Auto-save failed', e);
-      }
     }
 
     function loadData() {
@@ -301,196 +560,10 @@
       if (savedLang) currentLang = savedLang;
     }
 
-    function saveData(reason) {
+    function saveData() {
       localStorage.setItem('aoe_decks', JSON.stringify(decks));
       localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
       localStorage.setItem('aoe_lang', currentLang);
-      saveAutoVersion(reason || 'save');
-    }
-
-    function exportJSONBackup() {
-      try {
-        const payload = buildBackupPayload();
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        a.href = url;
-        a.download = `aoe-flashcards-backup-${stamp}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (e) {
-        console.error(e);
-        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '导出失败。' : 'Export failed.');
-      }
-    }
-
-    function triggerJSONImport() {
-      let input = document.getElementById('json-backup-import');
-      if (!input) {
-        input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json,application/json';
-        input.id = 'json-backup-import';
-        input.style.display = 'none';
-        document.body.appendChild(input);
-      }
-
-      input.value = '';
-      input.onchange = function() {
-        importJSONBackup(input);
-      };
-      input.click();
-    }
-
-    function importJSONBackup(input) {
-      const file = input.files && input.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        try {
-          const parsed = JSON.parse(e.target.result);
-
-          if (!Array.isArray(parsed.decks) || !parsed.settings || typeof parsed.settings !== 'object') {
-            throw new Error('Invalid backup file');
-          }
-
-          const ok = confirm(
-            (currentLang === 'zh' || currentLang === 'zh-TW')
-              ? '导入这个 JSON 备份？当前数据会被替换。'
-              : 'Import this JSON backup? Your current data will be replaced.'
-          );
-          if (!ok) return;
-
-          saveAutoVersion('before-json-import');
-
-          decks = parsed.decks || [];
-          globalSettings = parsed.settings || globalSettings;
-          currentLang = parsed.lang || currentLang;
-
-          localStorage.setItem('aoe_decks', JSON.stringify(decks));
-          localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
-          localStorage.setItem('aoe_lang', currentLang);
-
-          saveAutoVersion('json-import');
-
-          hideSettingsModal();
-          applyTextSize();
-          updateNav();
-          render(0);
-
-          if (currentDeckId && decks.find(d => d.id === currentDeckId)) {
-            openDeck(currentDeckId);
-          } else {
-            currentDeckId = null;
-          }
-
-          alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '✅ JSON 导入成功' : '✅ JSON imported successfully.');
-        } catch (err) {
-          console.error(err);
-          alert((currentLang === 'zh' || currentLang === 'zh-TW') ? 'JSON 导入失败。' : 'JSON import failed.');
-        }
-      };
-      reader.readAsText(file);
-    }
-
-    function restoreLocalVersion(versionId) {
-      const versions = getLocalVersions();
-      const version = versions.find(v => v.id === versionId);
-      if (!version) {
-        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '找不到该版本。' : 'Version not found.');
-        return;
-      }
-
-      const ok = confirm(
-        (currentLang === 'zh' || currentLang === 'zh-TW')
-          ? '恢复这个本地版本？当前数据会被替换。'
-          : 'Restore this local version? Your current data will be replaced.'
-      );
-      if (!ok) return;
-
-      try {
-        const parsed = JSON.parse(version.snapshot);
-        isRestoringVersion = true;
-
-        decks = parsed.decks || [];
-        globalSettings = parsed.settings || globalSettings;
-        currentLang = parsed.lang || currentLang;
-
-        localStorage.setItem('aoe_decks', JSON.stringify(decks));
-        localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
-        localStorage.setItem('aoe_lang', currentLang);
-
-        isRestoringVersion = false;
-        saveAutoVersion('restore-local-version');
-
-        hideSettingsModal();
-        applyTextSize();
-        updateNav();
-        render(0);
-
-        if (currentDeckId && decks.find(d => d.id === currentDeckId)) {
-          openDeck(currentDeckId);
-        } else {
-          currentDeckId = null;
-        }
-
-        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '✅ 已恢复版本' : '✅ Version restored.');
-      } catch (e) {
-        isRestoringVersion = false;
-        console.error(e);
-        alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '恢复失败。' : 'Restore failed.');
-      }
-    }
-
-    function formatVersionTime(ts) {
-      try {
-        return new Date(ts).toLocaleString();
-      } catch (e) {
-        return String(ts);
-      }
-    }
-
-    function renderBackupTools() {
-      let container = document.getElementById('backup-tools-container');
-      if (!container) return;
-
-      const versions = getLocalVersions();
-      let versionsHTML = '';
-
-      if (versions.length === 0) {
-        versionsHTML = '<div style="color:#64748b;font-size:14px;">No saved local versions yet.</div>';
-      } else {
-        versionsHTML = versions.map(v => {
-          return `
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #e2e8f0;">
-              <div style="flex:1;min-width:0;">
-                <div style="font-weight:600;font-size:14px;">${formatVersionTime(v.timestamp)}</div>
-                <div style="color:#64748b;font-size:13px;">${v.deckCount} decks • ${v.cardCount} cards • ${v.reason}</div>
-              </div>
-              <button onclick="restoreLocalVersion('${v.id}')" class="btn" style="background:#e2e8f0;padding:10px 16px;">Restore</button>
-            </div>
-          `;
-        }).join('');
-      }
-
-      container.innerHTML = `
-        <div style="margin-top:28px;border-top:1px solid #e2e8f0;padding-top:24px;">
-          <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;">Backup & Save</h3>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-            <button onclick="exportJSONBackup()" class="btn" style="background:#e2e8f0;">Export JSON</button>
-            <button onclick="triggerJSONImport()" class="btn" style="background:#e2e8f0;">Import JSON</button>
-          </div>
-          <div style="background:#f8fafc;border-radius:16px;padding:16px;">
-            <div style="font-weight:600;margin-bottom:8px;">Auto-saved local versions</div>
-            <div style="color:#64748b;font-size:13px;margin-bottom:8px;">Newest ${AUTO_SAVE_MAX_VERSIONS} versions are stored on this device.</div>
-            ${versionsHTML}
-          </div>
-        </div>
-      `;
     }
 
     function getTotalCards() {
@@ -534,8 +607,7 @@
 
     function navigateTo(tab) {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-      const active = document.getElementById(`nav-${tab}`);
-      if (active) active.classList.add('active');
+      document.getElementById(`nav-${tab}`).classList.add('active');
       if (tab === 4) showSettingsModal();
       else if (tab === 1) showCreateDeckModal();
       else render(tab);
@@ -608,7 +680,7 @@
     function updateHalfYearButton() {
       const btn = document.getElementById('half-year-btn');
       if (!btn) return;
-
+      
       if (globalSettings.halfYearMatureReview) {
         btn.classList.remove('btn-disabled');
         btn.style.background = '#e2e8f0';
@@ -623,6 +695,7 @@
     }
 
     function updateHalfYearButtonPreview() {
+      // For live preview in settings
     }
 
     function startGlobalReview() {
@@ -649,10 +722,10 @@
       }
 
       currentDeckId = targetDeckId;
-      currentStudySession = {
-        cards: reviewCards.sort(() => Math.random() - 0.5),
-        index: 0,
-        mode: "normal",
+      currentStudySession = { 
+        cards: reviewCards.sort(() => Math.random() - 0.5), 
+        index: 0, 
+        mode: "normal", 
         deckId: targetDeckId,
         newCount: 0
       };
@@ -664,10 +737,10 @@
       const limit = globalSettings.newWordsPerDay;
       const newIntroduced = currentStudySession.newCount || 0;
 
-      if (currentStudySession.cards[currentStudySession.index] &&
-          currentStudySession.cards[currentStudySession.index].section === 1 &&
+      if (currentStudySession.cards[currentStudySession.index] && 
+          currentStudySession.cards[currentStudySession.index].section === 1 && 
           newIntroduced >= limit) {
-
+        
         const msg = `You've reached your daily word limit of ${limit}!\n\nContinue anyway?`;
         if (!confirm(msg)) {
           hideStudyModal();
@@ -683,10 +756,8 @@
 
       const s = currentStudySession;
       const card = s.cards[s.index];
-      const deck = decks.find(d => d.id === s.deckId);
-      if (!card || !deck) return;
 
-      document.getElementById('study-deck-name').textContent = deck.name;
+      document.getElementById('study-deck-name').textContent = decks.find(d => d.id === s.deckId).name;
       document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
 
       if (card.section === 1) {
@@ -694,30 +765,14 @@
       }
 
       document.getElementById('front-text').innerHTML = card.front || '';
-      const fImg = document.getElementById('front-image');
-      fImg.style.display = card.image ? 'block' : 'none';
-      if (card.image) fImg.src = card.image;
-
-      const fAud = document.getElementById('front-audio');
-      fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none';
-      if (card.media && card.media.includes('audio')) fAud.src = card.media;
-
-      const fVid = document.getElementById('front-video');
-      fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none';
-      if (card.media && card.media.includes('video')) fVid.src = card.media;
+      const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
+      const fAud = document.getElementById('front-audio'); fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) fAud.src = card.media;
+      const fVid = document.getElementById('front-video'); fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) fVid.src = card.media;
 
       document.getElementById('back-text').innerHTML = card.back || '';
-      const bImg = document.getElementById('back-image');
-      bImg.style.display = card.image ? 'block' : 'none';
-      if (card.image) bImg.src = card.image;
-
-      const bAud = document.getElementById('back-audio');
-      bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none';
-      if (card.media && card.media.includes('audio')) bAud.src = card.media;
-
-      const bVid = document.getElementById('back-video');
-      bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none';
-      if (card.media && card.media.includes('video')) bVid.src = card.media;
+      const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
+      const bAud = document.getElementById('back-audio'); bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none'; if (card.media && card.media.includes('audio')) bAud.src = card.media;
+      const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
 
       document.getElementById('flashcard').classList.remove('flipped');
       document.getElementById('rating-buttons').style.display = 'grid';
@@ -733,7 +788,7 @@
       }
       hideDeckDetailModal();
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck || !deck.cards || deck.cards.length === 0) return alert('No cards yet');
+      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
 
       let sessionCards = [];
       if (mode === 'mature' && globalSettings.halfYearMatureReview) {
@@ -749,10 +804,10 @@
 
       if (sessionCards.length === 0) return alert('No cards are due right now.');
 
-      currentStudySession = {
-        cards: sessionCards,
-        index: 0,
-        mode,
+      currentStudySession = { 
+        cards: sessionCards, 
+        index: 0, 
+        mode, 
         deckId: currentDeckId,
         newCount: 0
       };
@@ -779,7 +834,7 @@
         }
       }
 
-      saveData('rate-card');
+      saveData();
 
       if (s.index < s.cards.length - 1) {
         s.index++;
@@ -791,8 +846,8 @@
       }
     }
 
-    function hideStudyModal() {
-      document.getElementById('study-modal').style.display = 'none';
+    function hideStudyModal() { 
+      document.getElementById('study-modal').style.display = 'none'; 
     }
 
     function showCreateDeckModal() {
@@ -808,10 +863,7 @@
       document.getElementById('create-btn').textContent = getText('create_deck_btn');
       renderColorPicker();
     }
-
-    function hideCreateDeckModal() {
-      document.getElementById('create-deck-modal').style.display = 'none';
-    }
+    function hideCreateDeckModal() { document.getElementById('create-deck-modal').style.display = 'none'; }
 
     function renderColorPicker() {
       const colors = ['#6d28d9','#a855f7','#ec4899','#ef4444','#f59e0b','#10b981','#14b8a6','#3b82f6'];
@@ -819,7 +871,6 @@
       colors.forEach((c,i) => html += `<div class="color-dot" style="background:${c}" onclick="selectColor(this)" data-index="${i}"></div>`);
       document.getElementById('color-picker').innerHTML = html;
     }
-
     function selectColor(el) {
       document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('selected'));
       el.classList.add('selected');
@@ -836,7 +887,7 @@
         cards: [],
         color: document.querySelector('.color-dot.selected') ? document.querySelector('.color-dot.selected').style.background : '#6d28d9'
       });
-      saveData('create-deck');
+      saveData();
       hideCreateDeckModal();
       render(0);
     }
@@ -844,8 +895,6 @@
     function openDeck(id) {
       currentDeckId = id;
       const deck = decks.find(d => d.id === id);
-      if (!deck) return;
-
       document.getElementById('deck-name-detail').innerHTML = `<span style="background:${deck.color};color:white;padding:4px 12px;border-radius:9999px;font-size:14px;">${deck.name}</span>`;
       document.getElementById('deck-desc-detail').textContent = deck.description || 'No description';
       document.getElementById('delete-deck-btn').textContent = getText('delete_deck');
@@ -884,21 +933,19 @@
       updateHalfYearButton();
     }
 
-    function hideDeckDetailModal() {
-      document.getElementById('deck-detail-modal').style.display = 'none';
-    }
+    function hideDeckDetailModal() { document.getElementById('deck-detail-modal').style.display = 'none'; }
 
     function deleteCurrentDeck() {
       if (!confirm(getText('delete_deck'))) return;
       decks = decks.filter(d => d.id !== currentDeckId);
-      saveData('delete-deck');
+      saveData();
       hideDeckDetailModal();
       render(0);
     }
 
     function editCard(cardId) {
       const deck = decks.find(d => d.id === currentDeckId);
-      const card = deck && deck.cards ? deck.cards.find(c => c.id === cardId) : null;
+      const card = deck.cards.find(c => c.id === cardId);
       if (!card) return;
       currentEditCardId = cardId;
 
@@ -1003,8 +1050,8 @@
         editMediaRecorder.start();
         isEditRecording = true;
         btn.textContent = '⏹ Stop Recording';
-      } catch(e) {
-        alert('Microphone permission required for live recording');
+      } catch(e) { 
+        alert('Microphone permission required for live recording'); 
       }
     }
 
@@ -1022,13 +1069,13 @@
 
     function saveEditedCard() {
       const deck = decks.find(d => d.id === currentDeckId);
-      const card = deck && deck.cards ? deck.cards.find(c => c.id === currentEditCardId) : null;
+      const card = deck.cards.find(c => c.id === currentEditCardId);
       if (card) {
         card.front = document.getElementById('edit-front').value.trim();
         card.back = document.getElementById('edit-back').value.trim();
         card.image = editImage;
         card.media = editMedia;
-        saveData('edit-card');
+        saveData();
       }
       hideEditCardModal();
       openDeck(currentDeckId);
@@ -1037,9 +1084,8 @@
     function deleteCard(cardId) {
       if (!confirm(getText('delete'))) return;
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck) return;
       deck.cards = deck.cards.filter(c => c.id !== cardId);
-      saveData('delete-card');
+      saveData();
       openDeck(currentDeckId);
     }
 
@@ -1059,10 +1105,7 @@
       document.getElementById('upload-btn-add').textContent = getText('upload');
       document.getElementById('save-card-btn').textContent = getText('save_changes');
     }
-
-    function hideAddCardModal() {
-      document.getElementById('add-card-modal').style.display = 'none';
-    }
+    function hideAddCardModal() { document.getElementById('add-card-modal').style.display = 'none'; }
 
     function previewImage(input) {
       const file = input.files[0];
@@ -1098,8 +1141,8 @@
         mediaRecorder.onstop = () => {
           const blob = new Blob(audioChunks, { type: 'audio/webm' });
           const reader = new FileReader();
-          reader.onload = e => {
-            currentMedia = e.target.result;
+          reader.onload = e => { 
+            currentMedia = e.target.result; 
             const audio = new Audio(currentMedia);
             audio.play().catch(() => {});
           };
@@ -1108,8 +1151,8 @@
         mediaRecorder.start();
         isRecording = true;
         btn.textContent = '⏹ Stop Recording';
-      } catch(e) {
-        alert('Microphone permission required for live recording');
+      } catch(e) { 
+        alert('Microphone permission required for live recording'); 
       }
     }
 
@@ -1119,8 +1162,6 @@
       if (!front || !back) return alert('Front and back are required');
 
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck) return;
-
       deck.cards.push({
         id: generateId(),
         front: front,
@@ -1130,7 +1171,7 @@
         section: 1,
         lastReviewed: null
       });
-      saveData('add-card');
+      saveData();
       hideAddCardModal();
       openDeck(currentDeckId);
     }
@@ -1140,10 +1181,10 @@
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
       document.getElementById('import-status').innerHTML = '';
-
+      
       const fileInput = document.getElementById('import-file');
       fileInput.value = '';
-
+      
       const label = document.getElementById('import-file-label');
       if (label) label.textContent = (currentLang === 'zh' || currentLang === 'zh-TW') ? '選擇 .apkg 檔案' : 'Select your .apkg / .colpkg / .ofc file';
     }
@@ -1198,7 +1239,7 @@
               const ext = (realFilename.split('.').pop() || '').toLowerCase();
               let mime = 'application/octet-stream';
               if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav','m4a','aac','flac','opus'].includes(ext)) mime = 'audio/';
+              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
               else if (['mp4','webm'].includes(ext)) mime = 'video/';
               const dataUrl = `data:${mime}${ext};base64,${data}`;
               mediaMap[indexStr] = dataUrl;
@@ -1208,8 +1249,8 @@
         }
 
         if (Object.keys(mediaMap).length === 0) {
-          const mediaFiles = Object.keys(zip.files).filter(name =>
-            name.match(/^\d+$/) || name.match(/\.(jpg|jpeg|png|gif|mp3|ogg|wav|m4a|aac|flac|opus|mp4|webm)$/i)
+          const mediaFiles = Object.keys(zip.files).filter(name => 
+            name.match(/^\d+$/) || name.match(/\.(jpg|png|gif|mp3|ogg|wav|mp4|webm)$/i)
           );
           for (const fname of mediaFiles) {
             const entry = zip.file(fname);
@@ -1218,7 +1259,7 @@
               const ext = (fname.split('.').pop() || '').toLowerCase();
               let mime = 'application/octet-stream';
               if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav','m4a','aac','flac','opus'].includes(ext)) mime = 'audio/';
+              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
               else if (['mp4','webm'].includes(ext)) mime = 'video/';
               const dataUrl = `data:${mime}${ext};base64,${data}`;
               mediaMap[fname] = dataUrl;
@@ -1241,7 +1282,7 @@
           Object.keys(mediaMap).forEach(key => {
             const dataUrl = mediaMap[key];
 
-            const imgRegex = new RegExp(`<img[^>]*src=["']${escapeRegex(key)}["'][^>]*>`, 'gi');
+            const imgRegex = new RegExp(`<img[^>]*src=["']${key}["'][^>]*>`, 'gi');
             if (imgRegex.test(front)) {
               cardImage = dataUrl;
               front = front.replace(imgRegex, '').trim();
@@ -1251,7 +1292,7 @@
               back = back.replace(imgRegex, '').trim();
             }
 
-            const soundRegex = new RegExp(`\\[sound:${escapeRegex(key)}\\]`, 'gi');
+            const soundRegex = new RegExp(`\\[sound:${key}\\]`, 'gi');
             if (soundRegex.test(front)) {
               cardMedia = dataUrl;
               front = front.replace(soundRegex, '').trim();
@@ -1261,9 +1302,6 @@
               back = back.replace(soundRegex, '').trim();
             }
           });
-
-          front = cleanupImportedText(front);
-          back = cleanupImportedText(back);
 
           importedCards.push({
             id: generateId(),
@@ -1289,10 +1327,10 @@
         };
 
         decks.push(newDeck);
-        saveData('import-apkg');
+        saveData();
 
         status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
-
+        
         setTimeout(() => {
           hideImportModal();
           render(0);
@@ -1303,19 +1341,6 @@
         console.error("Import error:", e);
         status.innerHTML += `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
       }
-    }
-
-    function escapeRegex(str) {
-      return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
-    function cleanupImportedText(text) {
-      return String(text || '')
-        .replace(/\[sound:[^\]]+\]/gi, '')
-        .replace(/\[\s*\]/g, '')
-        .replace(/<div><\/div>/gi, '')
-        .replace(/<br\s*\/?>\s*<br\s*\/?>/gi, '<br>')
-        .trim();
     }
 
     function showSettingsModal() {
@@ -1347,25 +1372,13 @@
           </div>`;
       }
 
-      let backupContainer = document.getElementById('backup-tools-container');
-      if (!backupContainer) {
-        backupContainer = document.createElement('div');
-        backupContainer.id = 'backup-tools-container';
-        const saveBtn = document.getElementById('save-settings-btn');
-        saveBtn.parentNode.insertBefore(backupContainer, saveBtn);
-      }
-
-      renderBackupTools();
-
       const slider = document.getElementById('text-size-slider');
       slider.oninput = () => {
         document.getElementById('text-size-value').textContent = slider.value + 'px';
       };
     }
 
-    function hideSettingsModal() {
-      document.getElementById('settings-modal').style.display = 'none';
-    }
+    function hideSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
 
     function saveSettings() {
       globalSettings.newWordsPerDay = parseInt(document.getElementById('global-new-per-day').value) || 20;
@@ -1378,13 +1391,13 @@
       globalSettings.intervals = Array.from(inputs).map(inp => parseInt(inp.value) || 0);
 
       currentLang = document.getElementById('language-select').value;
-      saveData('save-settings');
+      saveData();
 
       hideSettingsModal();
       applyTextSize();
       updateNav();
       render(0);
-
+      
       if (currentDeckId) {
         openDeck(currentDeckId);
       }
@@ -1397,18 +1410,19 @@
       updateNav();
       if (decks.length === 0) {
         decks.push({ id: generateId(), name: "Demo Deck", description: "Your first deck", newPerDay: 20, cards: [] });
-        saveData('init-demo');
+        saveData();
       }
       applyTextSize();
       navigateTo(0);
-      saveAutoVersion('app-open');
     }
 
     window.addEventListener('load', () => {
       const importFileInput = document.getElementById('import-file');
-      if (importFileInput) {
-        importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
-      }
+      if (importFileInput) importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
       init();
     });
-</script>
+
+    window.onload = init;
+  </script>
+</body>
+</html>
