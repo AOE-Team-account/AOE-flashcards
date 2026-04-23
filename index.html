@@ -11,8 +11,8 @@
 
   <title>AOE flashcards</title>
   
-  <script src="./jszip.min.js"></script>
-  <script src="./sql-wasm.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.min.js"></script>
   
   <style>
     :root { --primary: #6d28d9; }
@@ -531,6 +531,7 @@
       return text;
     }
 
+    // === MINIMAL CHANGE: Use midnight-to-midnight (12 AM to next 12 AM) ===
     function getDaysSince(lastReviewed) {
       if (!lastReviewed) return Infinity;
       const now = new Date();
@@ -550,6 +551,90 @@
       SQL = await initSqlJs(config);
     }
 
+
+    function escapeRegExp(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function getMimeType(filename) {
+      const ext = ((filename || '').split('.').pop() || '').toLowerCase();
+      const mimeMap = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', avif: 'image/avif',
+        mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac', opus: 'audio/opus', webm: 'audio/webm',
+        mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska'
+      };
+      return mimeMap[ext] || 'application/octet-stream';
+    }
+
+
+    function cleanupImportedFieldText(text) {
+      if (!text) return '';
+      let cleaned = String(text);
+
+      cleaned = cleaned
+        .replace(/\[sound:[^\]]+\]/gi, '')
+        .replace(/<audio[^>]*>[\s\S]*?<\/audio>/gi, '')
+        .replace(/<video[^>]*>[\s\S]*?<\/video>/gi, '')
+        .replace(/<source[^>]*>/gi, '')
+        .replace(/<img[^>]*>/gi, '')
+        .replace(/\[\s*\]/g, '')
+        .replace(/(^|\s)\[(\s*)(?=$|\s)/g, '$1')
+        .replace(/(^|\s)\](\s*)(?=$|\s)/g, '$1')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s*<br\s*\/?>\s*/gi, '<br>')
+        .replace(/(?:<br>\s*){3,}/gi, '<br><br>')
+        .replace(/[ 	]{2,}/g, ' ')
+        .replace(/(?:\s*<br>\s*)+$/gi, '')
+        .trim();
+
+      return cleaned;
+    }
+
+    function normalizeCardMedia(card) {
+      if (!card) return;
+      if (Array.isArray(card.mediaList)) {
+        card.mediaList = card.mediaList.filter(Boolean);
+      } else if (card.media) {
+        card.mediaList = [card.media];
+      } else {
+        card.mediaList = [];
+      }
+      if (!card.media && card.mediaList.length) card.media = card.mediaList[0];
+    }
+
+    function getPrimaryMedia(card) {
+      normalizeCardMedia(card);
+      return card.mediaList[0] || card.media || null;
+    }
+
+    function getAudioList(card) {
+      normalizeCardMedia(card);
+      return card.mediaList.filter(src => typeof src === 'string' && src.startsWith('data:audio'));
+    }
+
+    function getVideoList(card) {
+      normalizeCardMedia(card);
+      return card.mediaList.filter(src => typeof src === 'string' && src.startsWith('data:video'));
+    }
+
+    function buildMediaPreviewHTML(card) {
+      normalizeCardMedia(card);
+      const audioList = getAudioList(card);
+      const videoList = getVideoList(card);
+      let html = '';
+      if (audioList.length) {
+        html += audioList.map((src, idx) => `\n          <div style="margin-top:8px;">\n            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Audio ${idx + 1}</div>\n            <audio controls style="width:100%;"><source src="${src}"></audio>\n          </div>`).join('');
+      }
+      if (videoList.length) {
+        html += videoList.map((src, idx) => `\n          <div style="margin-top:8px;">\n            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Video ${idx + 1}</div>\n            <video controls style="width:100%;max-height:240px;border-radius:12px;"><source src="${src}"></video>\n          </div>`).join('');
+      }
+      if (!html && card.media) {
+        if (card.media.includes('audio')) html = `<div style="margin-top:8px;"><audio controls style="width:100%;"><source src="${card.media}"></audio></div>`;
+        else if (card.media.includes('video')) html = `<div style="margin-top:8px;"><video controls style="width:100%;max-height:240px;border-radius:12px;"><source src="${card.media}"></video></div>`;
+      }
+      return html;
+    }
+
     function loadData() {
       const savedDecks = localStorage.getItem('aoe_decks');
       const savedSettings = localStorage.getItem('aoe_settings');
@@ -557,6 +642,10 @@
       if (savedDecks) decks = JSON.parse(savedDecks);
       if (savedSettings) globalSettings = JSON.parse(savedSettings);
       if (savedLang) currentLang = savedLang;
+      decks.forEach(deck => {
+        if (!deck.cards) deck.cards = [];
+        deck.cards.forEach(card => normalizeCardMedia(card));
+      });
     }
 
     function saveData() {
@@ -606,8 +695,7 @@
 
     function navigateTo(tab) {
       document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-      const active = document.getElementById(`nav-${tab}`);
-      if (active) active.classList.add('active');
+      document.getElementById(`nav-${tab}`).classList.add('active');
       if (tab === 4) showSettingsModal();
       else if (tab === 1) showCreateDeckModal();
       else render(tab);
@@ -680,7 +768,7 @@
     function updateHalfYearButton() {
       const btn = document.getElementById('half-year-btn');
       if (!btn) return;
-
+      
       if (globalSettings.halfYearMatureReview) {
         btn.classList.remove('btn-disabled');
         btn.style.background = '#e2e8f0';
@@ -695,6 +783,7 @@
     }
 
     function updateHalfYearButtonPreview() {
+      // For live preview in settings
     }
 
     function startGlobalReview() {
@@ -721,10 +810,10 @@
       }
 
       currentDeckId = targetDeckId;
-      currentStudySession = {
-        cards: reviewCards.sort(() => Math.random() - 0.5),
-        index: 0,
-        mode: "normal",
+      currentStudySession = { 
+        cards: reviewCards.sort(() => Math.random() - 0.5), 
+        index: 0, 
+        mode: "normal", 
         deckId: targetDeckId,
         newCount: 0
       };
@@ -736,10 +825,10 @@
       const limit = globalSettings.newWordsPerDay;
       const newIntroduced = currentStudySession.newCount || 0;
 
-      if (currentStudySession.cards[currentStudySession.index] &&
-          currentStudySession.cards[currentStudySession.index].section === 1 &&
+      if (currentStudySession.cards[currentStudySession.index] && 
+          currentStudySession.cards[currentStudySession.index].section === 1 && 
           newIntroduced >= limit) {
-
+        
         const msg = `You've reached your daily word limit of ${limit}!\n\nContinue anyway?`;
         if (!confirm(msg)) {
           hideStudyModal();
@@ -755,10 +844,8 @@
 
       const s = currentStudySession;
       const card = s.cards[s.index];
-      const deck = decks.find(d => d.id === s.deckId);
-      if (!card || !deck) return;
 
-      document.getElementById('study-deck-name').textContent = deck.name;
+      document.getElementById('study-deck-name').textContent = decks.find(d => d.id === s.deckId).name;
       document.getElementById('study-progress').textContent = `${s.index + 1} / ${s.cards.length}`;
 
       if (card.section === 1) {
@@ -766,30 +853,16 @@
       }
 
       document.getElementById('front-text').innerHTML = card.front || '';
-      const fImg = document.getElementById('front-image');
-      fImg.style.display = card.image ? 'block' : 'none';
-      if (card.image) fImg.src = card.image;
-
-      const fAud = document.getElementById('front-audio');
-      fAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none';
-      if (card.media && card.media.includes('audio')) fAud.src = card.media;
-
-      const fVid = document.getElementById('front-video');
-      fVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none';
-      if (card.media && card.media.includes('video')) fVid.src = card.media;
+      const fImg = document.getElementById('front-image'); fImg.style.display = card.image ? 'block' : 'none'; if (card.image) fImg.src = card.image;
+      const frontAudios = getAudioList(card);
+      const frontVideos = getVideoList(card);
+      const fAud = document.getElementById('front-audio'); fAud.style.display = frontAudios.length ? 'block' : 'none'; if (frontAudios.length) fAud.src = frontAudios[0]; else fAud.removeAttribute('src'); fAud.load();
+      const fVid = document.getElementById('front-video'); fVid.style.display = frontVideos.length ? 'block' : 'none'; if (frontVideos.length) fVid.src = frontVideos[0]; else fVid.removeAttribute('src'); fVid.load();
 
       document.getElementById('back-text').innerHTML = card.back || '';
-      const bImg = document.getElementById('back-image');
-      bImg.style.display = card.image ? 'block' : 'none';
-      if (card.image) bImg.src = card.image;
-
-      const bAud = document.getElementById('back-audio');
-      bAud.style.display = (card.media && card.media.includes('audio')) ? 'block' : 'none';
-      if (card.media && card.media.includes('audio')) bAud.src = card.media;
-
-      const bVid = document.getElementById('back-video');
-      bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none';
-      if (card.media && card.media.includes('video')) bVid.src = card.media;
+      const bImg = document.getElementById('back-image'); bImg.style.display = card.image ? 'block' : 'none'; if (card.image) bImg.src = card.image;
+      const bAud = document.getElementById('back-audio'); bAud.style.display = frontAudios.length ? 'block' : 'none'; if (frontAudios.length) bAud.src = frontAudios[0]; else bAud.removeAttribute('src'); bAud.load();
+      const bVid = document.getElementById('back-video'); bVid.style.display = frontVideos.length ? 'block' : 'none'; if (frontVideos.length) bVid.src = frontVideos[0]; else bVid.removeAttribute('src'); bVid.load();
 
       document.getElementById('flashcard').classList.remove('flipped');
       document.getElementById('rating-buttons').style.display = 'grid';
@@ -805,7 +878,7 @@
       }
       hideDeckDetailModal();
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck || !deck.cards || deck.cards.length === 0) return alert('No cards yet');
+      if (!deck.cards || deck.cards.length === 0) return alert('No cards yet');
 
       let sessionCards = [];
       if (mode === 'mature' && globalSettings.halfYearMatureReview) {
@@ -821,10 +894,10 @@
 
       if (sessionCards.length === 0) return alert('No cards are due right now.');
 
-      currentStudySession = {
-        cards: sessionCards,
-        index: 0,
-        mode,
+      currentStudySession = { 
+        cards: sessionCards, 
+        index: 0, 
+        mode, 
         deckId: currentDeckId,
         newCount: 0
       };
@@ -863,8 +936,8 @@
       }
     }
 
-    function hideStudyModal() {
-      document.getElementById('study-modal').style.display = 'none';
+    function hideStudyModal() { 
+      document.getElementById('study-modal').style.display = 'none'; 
     }
 
     function showCreateDeckModal() {
@@ -880,10 +953,7 @@
       document.getElementById('create-btn').textContent = getText('create_deck_btn');
       renderColorPicker();
     }
-
-    function hideCreateDeckModal() {
-      document.getElementById('create-deck-modal').style.display = 'none';
-    }
+    function hideCreateDeckModal() { document.getElementById('create-deck-modal').style.display = 'none'; }
 
     function renderColorPicker() {
       const colors = ['#6d28d9','#a855f7','#ec4899','#ef4444','#f59e0b','#10b981','#14b8a6','#3b82f6'];
@@ -891,7 +961,6 @@
       colors.forEach((c,i) => html += `<div class="color-dot" style="background:${c}" onclick="selectColor(this)" data-index="${i}"></div>`);
       document.getElementById('color-picker').innerHTML = html;
     }
-
     function selectColor(el) {
       document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('selected'));
       el.classList.add('selected');
@@ -916,8 +985,6 @@
     function openDeck(id) {
       currentDeckId = id;
       const deck = decks.find(d => d.id === id);
-      if (!deck) return;
-
       document.getElementById('deck-name-detail').innerHTML = `<span style="background:${deck.color};color:white;padding:4px 12px;border-radius:9999px;font-size:14px;">${deck.name}</span>`;
       document.getElementById('deck-desc-detail').textContent = deck.description || 'No description';
       document.getElementById('delete-deck-btn').textContent = getText('delete_deck');
@@ -943,7 +1010,7 @@
           <div style="font-weight:600;">${card.front || 'No front'}</div>
           <div style="color:#64748b;margin-top:4px;">${card.back || 'No back'}</div>
           ${card.image ? `<img src="${card.image}" class="media-preview">` : ''}
-          ${card.media ? `<div style="margin-top:8px;"><audio controls style="width:100%;"><source src="${card.media}"></audio></div>` : ''}
+          ${buildMediaPreviewHTML(card)}
           <div style="position:absolute;top:12px;right:12px;display:flex;gap:8px;">
             <button onclick="editCard('${card.id}');event.stopImmediatePropagation()" style="background:#e2e8f0;color:#64748b;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('edit')}</button>
             <button onclick="deleteCard('${card.id}');event.stopImmediatePropagation()" style="background:#fee2e2;color:#ef4444;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('delete')}</button>
@@ -956,9 +1023,7 @@
       updateHalfYearButton();
     }
 
-    function hideDeckDetailModal() {
-      document.getElementById('deck-detail-modal').style.display = 'none';
-    }
+    function hideDeckDetailModal() { document.getElementById('deck-detail-modal').style.display = 'none'; }
 
     function deleteCurrentDeck() {
       if (!confirm(getText('delete_deck'))) return;
@@ -970,7 +1035,7 @@
 
     function editCard(cardId) {
       const deck = decks.find(d => d.id === currentDeckId);
-      const card = deck && deck.cards ? deck.cards.find(c => c.id === cardId) : null;
+      const card = deck.cards.find(c => c.id === cardId);
       if (!card) return;
       currentEditCardId = cardId;
 
@@ -978,7 +1043,7 @@
       document.getElementById('edit-back').value = card.back || '';
 
       editImage = card.image || null;
-      editMedia = card.media || null;
+      editMedia = Array.isArray(card.mediaList) ? [...card.mediaList] : (card.media ? [card.media] : null);
 
       renderEditImagePreview();
       renderEditMediaPreview();
@@ -1006,14 +1071,17 @@
 
     function renderEditMediaPreview() {
       const container = document.getElementById('edit-media-preview-container');
-      if (editMedia) {
-        if (editMedia.includes('audio')) {
-          container.innerHTML = `<audio controls style="width:100%;"><source src="${editMedia}"></audio>`;
-        } else if (editMedia.includes('video')) {
-          container.innerHTML = `<video controls style="width:100%;"><source src="${editMedia}"></video>`;
-        } else {
-          container.innerHTML = `<p style="color:#10b981;">Media attached</p>`;
-        }
+      const mediaList = Array.isArray(editMedia) ? editMedia.filter(Boolean) : (editMedia ? [editMedia] : []);
+      if (mediaList.length) {
+        container.innerHTML = mediaList.map((src, idx) => {
+          if (typeof src === 'string' && src.startsWith('data:audio')) {
+            return `<div style="margin-bottom:12px;"><div style="font-size:12px;color:#64748b;margin-bottom:4px;">Audio ${idx + 1}</div><audio controls style="width:100%;"><source src="${src}"></audio></div>`;
+          }
+          if (typeof src === 'string' && src.startsWith('data:video')) {
+            return `<div style="margin-bottom:12px;"><div style="font-size:12px;color:#64748b;margin-bottom:4px;">Video ${idx + 1}</div><video controls style="width:100%;max-height:240px;border-radius:12px;"><source src="${src}"></video></div>`;
+          }
+          return `<p style="color:#10b981;">Media attached</p>`;
+        }).join('');
       } else {
         container.innerHTML = `<p style="color:#64748b;padding:20px;text-align:center;border:1px dashed #cbd5e1;border-radius:12px;">${getText('no_sound')}</p>`;
       }
@@ -1041,7 +1109,7 @@
       if (file) {
         const reader = new FileReader();
         reader.onload = e => {
-          editMedia = e.target.result;
+          editMedia = [e.target.result];
           renderEditMediaPreview();
         };
         reader.readAsDataURL(file);
@@ -1065,7 +1133,7 @@
           const blob = new Blob(editAudioChunks, { type: 'audio/webm' });
           const reader = new FileReader();
           reader.onload = e => {
-            editMedia = e.target.result;
+            editMedia = [e.target.result];
             renderEditMediaPreview();
             const audio = new Audio(editMedia);
             audio.play().catch(() => {});
@@ -1075,8 +1143,8 @@
         editMediaRecorder.start();
         isEditRecording = true;
         btn.textContent = '⏹ Stop Recording';
-      } catch(e) {
-        alert('Microphone permission required for live recording');
+      } catch(e) { 
+        alert('Microphone permission required for live recording'); 
       }
     }
 
@@ -1094,12 +1162,13 @@
 
     function saveEditedCard() {
       const deck = decks.find(d => d.id === currentDeckId);
-      const card = deck && deck.cards ? deck.cards.find(c => c.id === currentEditCardId) : null;
+      const card = deck.cards.find(c => c.id === currentEditCardId);
       if (card) {
         card.front = document.getElementById('edit-front').value.trim();
         card.back = document.getElementById('edit-back').value.trim();
         card.image = editImage;
-        card.media = editMedia;
+        card.mediaList = Array.isArray(editMedia) ? editMedia.filter(Boolean) : (editMedia ? [editMedia] : []);
+        card.media = card.mediaList[0] || null;
         saveData();
       }
       hideEditCardModal();
@@ -1109,7 +1178,6 @@
     function deleteCard(cardId) {
       if (!confirm(getText('delete'))) return;
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck) return;
       deck.cards = deck.cards.filter(c => c.id !== cardId);
       saveData();
       openDeck(currentDeckId);
@@ -1131,10 +1199,7 @@
       document.getElementById('upload-btn-add').textContent = getText('upload');
       document.getElementById('save-card-btn').textContent = getText('save_changes');
     }
-
-    function hideAddCardModal() {
-      document.getElementById('add-card-modal').style.display = 'none';
-    }
+    function hideAddCardModal() { document.getElementById('add-card-modal').style.display = 'none'; }
 
     function previewImage(input) {
       const file = input.files[0];
@@ -1149,7 +1214,7 @@
       const file = input.files[0];
       if (file) {
         const reader = new FileReader();
-        reader.onload = e => currentMedia = e.target.result;
+        reader.onload = e => currentMedia = [e.target.result];
         reader.readAsDataURL(file);
       }
     }
@@ -1170,8 +1235,8 @@
         mediaRecorder.onstop = () => {
           const blob = new Blob(audioChunks, { type: 'audio/webm' });
           const reader = new FileReader();
-          reader.onload = e => {
-            currentMedia = e.target.result;
+          reader.onload = e => { 
+            currentMedia = [e.target.result]; 
             const audio = new Audio(currentMedia);
             audio.play().catch(() => {});
           };
@@ -1180,8 +1245,8 @@
         mediaRecorder.start();
         isRecording = true;
         btn.textContent = '⏹ Stop Recording';
-      } catch(e) {
-        alert('Microphone permission required for live recording');
+      } catch(e) { 
+        alert('Microphone permission required for live recording'); 
       }
     }
 
@@ -1191,14 +1256,13 @@
       if (!front || !back) return alert('Front and back are required');
 
       const deck = decks.find(d => d.id === currentDeckId);
-      if (!deck) return;
-
       deck.cards.push({
         id: generateId(),
         front: front,
         back: back,
         image: currentImage,
-        media: currentMedia,
+        mediaList: Array.isArray(currentMedia) ? currentMedia.filter(Boolean) : (currentMedia ? [currentMedia] : []),
+        media: (Array.isArray(currentMedia) ? currentMedia[0] : currentMedia) || null,
         section: 1,
         lastReviewed: null
       });
@@ -1212,48 +1276,16 @@
       document.getElementById('import-title').textContent = getText('import_title');
       document.getElementById('import-desc').innerHTML = getText('import_desc');
       document.getElementById('import-status').innerHTML = '';
-
+      
       const fileInput = document.getElementById('import-file');
       fileInput.value = '';
-
+      
       const label = document.getElementById('import-file-label');
       if (label) label.textContent = (currentLang === 'zh' || currentLang === 'zh-TW') ? '選擇 .apkg 檔案' : 'Select your .apkg / .colpkg / .ofc file';
     }
 
     function hideImportModal() {
       document.getElementById('import-modal').style.display = 'none';
-    }
-
-    function escapeRegex(str) {
-      return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
-    function cleanupImportedText(text) {
-      return String(text || '')
-        .replace(/\[sound:[^\]]+\]/gi, '')
-        .replace(/\[\s*\]/g, '')
-        .replace(/<div><\/div>/gi, '')
-        .replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>')
-        .trim();
-    }
-
-    function getMimeTypeFromExt(filename) {
-      const ext = String(filename.split('.').pop() || '').toLowerCase();
-      if (['jpg', 'jpeg'].includes(ext)) return 'image/jpeg';
-      if (ext === 'png') return 'image/png';
-      if (ext === 'gif') return 'image/gif';
-      if (ext === 'webp') return 'image/webp';
-      if (ext === 'svg') return 'image/svg+xml';
-      if (ext === 'mp3') return 'audio/mpeg';
-      if (ext === 'ogg') return 'audio/ogg';
-      if (ext === 'wav') return 'audio/wav';
-      if (ext === 'm4a') return 'audio/mp4';
-      if (ext === 'aac') return 'audio/aac';
-      if (ext === 'flac') return 'audio/flac';
-      if (ext === 'opus') return 'audio/opus';
-      if (ext === 'mp4') return 'video/mp4';
-      if (ext === 'webm') return 'video/webm';
-      return 'application/octet-stream';
     }
 
     async function handleImportFile(input) {
@@ -1288,121 +1320,131 @@
           throw new Error('This appears to be a dummy database. Please re-export from Anki with "Support older Anki versions" checked.');
         }
 
-        status.innerHTML = `<p>📦 Reading media map...</p>`;
+        const mediaMap = {};
 
-        const mediaFilenameMap = {};
         const mediaJsonFile = zip.file('media');
         if (mediaJsonFile) {
           const mediaJsonText = await mediaJsonFile.async('string');
-          const parsedMediaJson = JSON.parse(mediaJsonText);
-          Object.entries(parsedMediaJson).forEach(([indexStr, realFilename]) => {
-            mediaFilenameMap[indexStr] = realFilename;
-            mediaFilenameMap[realFilename] = indexStr;
-          });
-        }
+          const mediaFilenameMap = JSON.parse(mediaJsonText);
 
-        const mediaDataUrlCache = new Map();
-
-        async function getMediaDataUrlByName(requestedName) {
-          if (!requestedName) return null;
-
-          const normalizedName = String(requestedName).trim();
-          if (!normalizedName) return null;
-
-          if (mediaDataUrlCache.has(normalizedName)) {
-            return mediaDataUrlCache.get(normalizedName);
-          }
-
-          let entry = zip.file(normalizedName);
-          let actualFilename = normalizedName;
-
-          if (!entry && mediaFilenameMap[normalizedName] != null) {
-            const mapped = String(mediaFilenameMap[normalizedName]);
-            entry = zip.file(mapped);
-            if (entry) actualFilename = normalizedName;
-          }
-
-          if (!entry) {
-            const reverseMapped = mediaFilenameMap[normalizedName];
-            if (reverseMapped != null) {
-              entry = zip.file(String(reverseMapped));
-              if (entry) actualFilename = normalizedName;
+          for (const [indexStr, realFilename] of Object.entries(mediaFilenameMap)) {
+            const entry = zip.file(indexStr) || zip.file(realFilename);
+            if (entry) {
+              const data = await entry.async('base64');
+              const mime = getMimeType(realFilename);
+              const dataUrl = `data:${mime};base64,${data}`;
+              mediaMap[indexStr] = dataUrl;
+              mediaMap[realFilename] = dataUrl;
             }
           }
+        }
 
-          if (!entry) {
-            mediaDataUrlCache.set(normalizedName, null);
-            return null;
+        if (Object.keys(mediaMap).length === 0) {
+          const mediaFiles = Object.keys(zip.files).filter(name => 
+            name.match(/^\d+$/) || name.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|mp3|m4a|aac|ogg|oga|wav|flac|opus|mp4|m4v|mov|mkv|webm)$/i)
+          );
+          for (const fname of mediaFiles) {
+            const entry = zip.file(fname);
+            if (entry) {
+              const data = await entry.async('base64');
+              const mime = getMimeType(fname);
+              const dataUrl = `data:${mime};base64,${data}`;
+              mediaMap[fname] = dataUrl;
+            }
           }
-
-          const base64Data = await entry.async('base64');
-          const mime = getMimeTypeFromExt(actualFilename);
-          const dataUrl = `data:${mime};base64,${base64Data}`;
-          mediaDataUrlCache.set(normalizedName, dataUrl);
-          return dataUrl;
         }
 
         const notesStmt = db.prepare("SELECT flds FROM notes");
         const importedCards = [];
-        let processed = 0;
 
         while (notesStmt.step()) {
           const row = notesStmt.get();
-          const fields = (row[0] || '').split('\x1f');
+          const fields = (row[0] || '').split('');
           let front = fields[0] || 'No front';
           let back = fields[1] || (fields.slice(1).join(' • ') || 'No back');
 
           let cardImage = null;
-          let cardMedia = null;
+          const cardMediaList = [];
+          const seenMedia = new Set();
 
-          const combined = `${front}\n${back}`;
+          Object.keys(mediaMap).forEach(key => {
+            const dataUrl = mediaMap[key];
+            const safeKey = escapeRegExp(key);
 
-          const soundMatches = [...combined.matchAll(/\[sound:([^\]]+)\]/gi)].map(m => m[1]);
-          const imgMatches = [...combined.matchAll(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi)].map(m => m[1]);
-
-          if (imgMatches.length > 0) {
-            const firstImageName = imgMatches[0];
-            const imageUrl = await getMediaDataUrlByName(firstImageName);
-            if (imageUrl) cardImage = imageUrl;
-
-            for (const imgName of imgMatches) {
-              const imgRegex = new RegExp(`<img[^>]*src=["']${escapeRegex(imgName)}["'][^>]*>`, 'gi');
+            const imgRegex = new RegExp(`<img[^>]*src=["']${safeKey}["'][^>]*>`, 'gi');
+            if (imgRegex.test(front)) {
+              cardImage = cardImage || dataUrl;
               front = front.replace(imgRegex, '').trim();
+            }
+            if (imgRegex.test(back)) {
+              cardImage = cardImage || dataUrl;
               back = back.replace(imgRegex, '').trim();
             }
-          }
 
-          if (soundMatches.length > 0) {
-            const firstSoundName = soundMatches[0];
-            const mediaUrl = await getMediaDataUrlByName(firstSoundName);
-            if (mediaUrl) cardMedia = mediaUrl;
-
-            for (const soundName of soundMatches) {
-              const soundRegex = new RegExp(`\\[sound:${escapeRegex(soundName)}\\]`, 'gi');
+            const soundRegex = new RegExp(`\\[sound:${safeKey}\\]`, 'gi');
+            if (soundRegex.test(front)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
               front = front.replace(soundRegex, '').trim();
+            }
+            if (soundRegex.test(back)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
               back = back.replace(soundRegex, '').trim();
             }
-          }
 
-          front = cleanupImportedText(front);
-          back = cleanupImportedText(back);
+            const audioSrcRegex = new RegExp(`<audio[^>]*src=["']${safeKey}["'][^>]*>(?:.*?)<\/audio>`, 'gis');
+            const audioSourceRegex = new RegExp(`<audio[^>]*>(?:.*?)<source[^>]*src=["']${safeKey}["'][^>]*>(?:.*?)<\/audio>`, 'gis');
+            if (audioSrcRegex.test(front) || audioSourceRegex.test(front)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
+              front = front.replace(audioSrcRegex, '').replace(audioSourceRegex, '').trim();
+            }
+            if (audioSrcRegex.test(back) || audioSourceRegex.test(back)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
+              back = back.replace(audioSrcRegex, '').replace(audioSourceRegex, '').trim();
+            }
+
+            const videoSrcRegex = new RegExp(`<video[^>]*src=["']${safeKey}["'][^>]*>(?:.*?)<\/video>`, 'gis');
+            const videoSourceRegex = new RegExp(`<video[^>]*>(?:.*?)<source[^>]*src=["']${safeKey}["'][^>]*>(?:.*?)<\/video>`, 'gis');
+            if (videoSrcRegex.test(front) || videoSourceRegex.test(front)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
+              front = front.replace(videoSrcRegex, '').replace(videoSourceRegex, '').trim();
+            }
+            if (videoSrcRegex.test(back) || videoSourceRegex.test(back)) {
+              if (!seenMedia.has(dataUrl)) {
+                cardMediaList.push(dataUrl);
+                seenMedia.add(dataUrl);
+              }
+              back = back.replace(videoSrcRegex, '').replace(videoSourceRegex, '').trim();
+            }
+          });
+
+          front = cleanupImportedFieldText(front);
+          back = cleanupImportedFieldText(back);
 
           importedCards.push({
             id: generateId(),
-            front,
-            back,
+            front: front,
+            back: back,
             image: cardImage,
-            media: cardMedia,
+            mediaList: cardMediaList,
+            media: cardMediaList[0] || null,
             section: 1,
             lastReviewed: null
           });
-
-          processed++;
-
-          if (processed % 25 === 0) {
-            status.innerHTML = `<p>📦 Importing notes... ${processed} cards processed</p>`;
-            await new Promise(resolve => setTimeout(resolve, 0));
-          }
         }
 
         notesStmt.free();
@@ -1420,17 +1462,17 @@
         decks.push(newDeck);
         saveData();
 
-        status.innerHTML = `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
-
+        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
+        
         setTimeout(() => {
           hideImportModal();
           render(0);
           if (newDeck.id) openDeck(newDeck.id);
-        }, 800);
+        }, 1500);
 
       } catch(e) {
         console.error("Import error:", e);
-        status.innerHTML = `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
+        status.innerHTML += `<p style="color:#ef4444;">Import failed.<br><br>${e.message || e}</p>`;
       }
     }
 
@@ -1469,9 +1511,7 @@
       };
     }
 
-    function hideSettingsModal() {
-      document.getElementById('settings-modal').style.display = 'none';
-    }
+    function hideSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
 
     function saveSettings() {
       globalSettings.newWordsPerDay = parseInt(document.getElementById('global-new-per-day').value) || 20;
@@ -1490,7 +1530,7 @@
       applyTextSize();
       updateNav();
       render(0);
-
+      
       if (currentDeckId) {
         openDeck(currentDeckId);
       }
@@ -1511,11 +1551,11 @@
 
     window.addEventListener('load', () => {
       const importFileInput = document.getElementById('import-file');
-      if (importFileInput) {
-        importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
-      }
+      if (importFileInput) importFileInput.addEventListener('change', () => handleImportFile(importFileInput));
       init();
     });
-</script>
+
+    window.onload = init;
+  </script>
 </body>
 </html>
