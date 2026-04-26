@@ -11,9 +11,8 @@
 
   <title>AOE flashcards</title>
   
-   
-  <script src="./vendor/jszip.min.js"></script>
-  <script src="./vendor/sql-wasm.js"></script>
+  <script src="./jszip.min.js"></script>
+  <script src="./sql-wasm.js"></script>
   
   <style>
     :root { --primary: #6d28d9; }
@@ -311,15 +310,22 @@
         <option value="zh-TW">繁體中文</option>
       </select>
 
-
-      <div style="margin:28px 0 8px;padding-top:24px;border-top:1px solid #e2e8f0;">
-        <div id="latest-backup-title" style="font-weight:700;margin-bottom:10px;">Latest Backup</div>
-        <div id="latest-backup-status" style="color:#64748b;margin-bottom:14px;font-size:15px;"></div>
-        <div style="display:flex;gap:12px;">
-          <button onclick="saveLatestBackupInApp()" class="btn" style="flex:1;background:#e2e8f0;" id="save-latest-backup-btn">Save Latest Backup</button>
-          <button onclick="restoreLatestBackupFromApp()" class="btn" style="flex:1;background:#e2e8f0;" id="restore-latest-backup-btn">Restore Latest Backup</button>
-        </div>
+      <div style="margin-top:28px;border-top:1px solid #e2e8f0;padding-top:24px;">
+      <h3 style="font-size:18px;font-weight:700;margin-bottom:14px;">Cloud Sync</h3>
+      <p style="color:#64748b;font-size:14px;line-height:1.5;margin-bottom:14px;">Sign up or log in to sync decks, progress, settings, and language across devices.</p>
+      <input type="text" id="cloud-username" placeholder="Username" autocomplete="username">
+      <input type="password" id="cloud-password" placeholder="Password" autocomplete="current-password">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <button onclick="signupCloudAccount()" class="btn" style="background:#ede9fe;color:#5b21b6;">Sign Up</button>
+        <button onclick="loginCloudAccount()" class="btn" style="background:#e0f2fe;color:#075985;">Log In</button>
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+        <button onclick="syncToCloud(true)" class="btn" style="background:#dcfce7;color:#166534;">Sync Now</button>
+        <button onclick="loadCloudData()" class="btn" style="background:#fef3c7;color:#92400e;">Load Cloud</button>
+      </div>
+      <button onclick="logoutCloudAccount()" class="btn" style="width:100%;margin-top:12px;background:#fee2e2;color:#b91c1c;">Log Out</button>
+      <div id="cloud-sync-status" style="margin-top:12px;font-size:14px;color:#64748b;line-height:1.5;">Not logged in</div>
+    </div>
 
       <button onclick="saveSettings()" class="btn btn-primary" style="width:100%;margin-top:32px;padding:18px;" id="save-settings-btn"></button>
     </div>
@@ -554,150 +560,212 @@
 
     let SQL = null;
 
+    const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+      ? 'http://localhost:3000/api'
+      : 'https://YOUR-BACKEND-DOMAIN/api';
+    let authToken = null;
+    let currentUser = null;
+    let syncTimeout = null;
+    let isCloudLoading = false;
+
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
 
-
+    
 async function initSQL() {
   if (SQL) return;
   const config = { locateFile: file => `./vendor/${file}` };
   SQL = await initSqlJs(config);
 }
 
+    function getLocalAppState() {
+      return {
+        decks,
+        globalSettings,
+        currentLang
+      };
+    }
+
+    function applyAppState(state) {
+      if (!state || typeof state !== 'object') return;
+      if (Array.isArray(state.decks)) decks = state.decks;
+      if (state.globalSettings && typeof state.globalSettings === 'object') {
+        globalSettings = state.globalSettings;
+      }
+      if (state.currentLang) currentLang = state.currentLang;
+    }
+
     function loadData() {
       const savedDecks = localStorage.getItem('aoe_decks');
       const savedSettings = localStorage.getItem('aoe_settings');
       const savedLang = localStorage.getItem('aoe_lang');
+      const savedToken = localStorage.getItem('aoe_auth_token');
+      const savedUser = localStorage.getItem('aoe_auth_user');
       if (savedDecks) decks = JSON.parse(savedDecks);
       if (savedSettings) globalSettings = JSON.parse(savedSettings);
       if (savedLang) currentLang = savedLang;
+      if (savedToken) authToken = savedToken;
+      if (savedUser) currentUser = savedUser;
     }
 
-    function saveData() {
+    function updateCloudSyncStatus(message, isError = false) {
+      const el = document.getElementById('cloud-sync-status');
+      if (!el) return;
+      el.textContent = message;
+      el.style.color = isError ? '#b91c1c' : '#64748b';
+    }
+
+    function updateCloudSyncUI() {
+      const usernameInput = document.getElementById('cloud-username');
+      const passwordInput = document.getElementById('cloud-password');
+      if (usernameInput && currentUser && !usernameInput.value) usernameInput.value = currentUser;
+      if (passwordInput) passwordInput.value = '';
+      if (currentUser) {
+        updateCloudSyncStatus(`Logged in as ${currentUser}. Changes sync automatically.`);
+      } else {
+        updateCloudSyncStatus('Not logged in');
+      }
+    }
+
+    function saveData(skipCloud = false) {
       localStorage.setItem('aoe_decks', JSON.stringify(decks));
       localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
       localStorage.setItem('aoe_lang', currentLang);
+      if (authToken) localStorage.setItem('aoe_auth_token', authToken); else localStorage.removeItem('aoe_auth_token');
+      if (currentUser) localStorage.setItem('aoe_auth_user', currentUser); else localStorage.removeItem('aoe_auth_user');
+
+      if (!skipCloud && authToken && !isCloudLoading) {
+        queueCloudSync();
+      }
     }
 
-    const LATEST_BACKUP_KEY = 'aoe_latest_backup';
+    function queueCloudSync() {
+      clearTimeout(syncTimeout);
+      syncTimeout = setTimeout(() => {
+        syncToCloud(false).catch(() => {});
+      }, 800);
+    }
 
-    function buildLatestBackupPayload() {
-      return {
-        version: 1,
-        app: 'AOE flashcards',
-        savedAt: new Date().toISOString(),
-        decks: decks,
-        settings: globalSettings,
-        lang: currentLang
+    async function apiFetch(path, options = {}) {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(options.headers || {})
       };
+      if (authToken) headers.Authorization = `Bearer ${authToken}`;
+      const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Request failed');
+      }
+      return data;
     }
 
-    function getLatestBackupMeta() {
-      const raw = localStorage.getItem(LATEST_BACKUP_KEY);
-      if (!raw) return null;
+    async function signupCloudAccount() {
+      const username = document.getElementById('cloud-username')?.value.trim();
+      const password = document.getElementById('cloud-password')?.value || '';
+      if (!username || !password) return alert('Username and password are required.');
       try {
-        const backup = JSON.parse(raw);
-        if (!backup || !Array.isArray(backup.decks)) return null;
-        return backup;
-      } catch (e) {
-        return null;
+        const data = await apiFetch('/auth/signup', {
+          method: 'POST',
+          body: JSON.stringify({ username, password })
+        });
+        authToken = data.token;
+        currentUser = data.username;
+        saveData(true);
+        updateCloudSyncUI();
+        await syncToCloud(false);
+        alert('✅ Account created and current data synced.');
+      } catch (error) {
+        updateCloudSyncStatus(error.message, true);
+        alert(error.message);
       }
     }
 
-    function formatBackupTime(isoString) {
-      if (!isoString) return '';
-      const d = new Date(isoString);
-      if (isNaN(d.getTime())) return isoString;
-      return d.toLocaleString();
+    async function loginCloudAccount() {
+      const username = document.getElementById('cloud-username')?.value.trim();
+      const password = document.getElementById('cloud-password')?.value || '';
+      if (!username || !password) return alert('Username and password are required.');
+      try {
+        const data = await apiFetch('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ username, password })
+        });
+        authToken = data.token;
+        currentUser = data.username;
+        saveData(true);
+        updateCloudSyncUI();
+        await loadCloudData(true);
+      } catch (error) {
+        updateCloudSyncStatus(error.message, true);
+        alert(error.message);
+      }
     }
 
-    function updateLatestBackupUI() {
-      const statusEl = document.getElementById('latest-backup-status');
-      const restoreBtn = document.getElementById('restore-latest-backup-btn');
-      if (!statusEl) return;
+    function logoutCloudAccount() {
+      authToken = null;
+      currentUser = null;
+      saveData(true);
+      updateCloudSyncUI();
+      alert('Logged out from cloud sync. Local data stays on this device.');
+    }
 
-      const backup = getLatestBackupMeta();
-      if (!backup) {
-        statusEl.textContent = (currentLang === 'zh')
-          ? '应用内还没有备份。'
-          : (currentLang === 'zh-TW')
-            ? '應用內還沒有備份。'
-            : 'No in-app backup yet.';
-        if (restoreBtn) restoreBtn.classList.add('btn-disabled');
-        if (restoreBtn) restoreBtn.disabled = true;
+    async function syncToCloud(showAlert = true) {
+      if (!authToken) {
+        if (showAlert) alert('Log in first to sync.');
         return;
       }
-
-      const deckCount = Array.isArray(backup.decks) ? backup.decks.length : 0;
-      const timeText = formatBackupTime(backup.savedAt);
-      if (currentLang === 'zh') {
-        statusEl.textContent = `最近备份：${timeText} · ${deckCount} 个牌组`;
-      } else if (currentLang === 'zh-TW') {
-        statusEl.textContent = `最近備份：${timeText} · ${deckCount} 個牌組`;
-      } else {
-        statusEl.textContent = `Latest in-app backup: ${timeText} • ${deckCount} deck${deckCount === 1 ? '' : 's'}`;
-      }
-      if (restoreBtn) restoreBtn.classList.remove('btn-disabled');
-      if (restoreBtn) restoreBtn.disabled = false;
-    }
-
-    function saveLatestBackupInApp() {
       try {
-        const payload = buildLatestBackupPayload();
-        localStorage.setItem(LATEST_BACKUP_KEY, JSON.stringify(payload));
-        updateLatestBackupUI();
-        alert((currentLang === 'zh')
-          ? '✅ 已保存应用内最新备份'
-          : (currentLang === 'zh-TW')
-            ? '✅ 已保存應用內最新備份'
-            : '✅ Latest backup saved in the app.');
-      } catch (e) {
-        alert((currentLang === 'zh')
-          ? '备份保存失败，可能是储存空间不足。'
-          : (currentLang === 'zh-TW')
-            ? '備份保存失敗，可能是儲存空間不足。'
-            : 'Backup save failed. Storage may be full.');
+        updateCloudSyncStatus('Syncing...');
+        const payload = {
+          appData: getLocalAppState()
+        };
+        const data = await apiFetch('/sync', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        updateCloudSyncStatus(`Last synced: ${new Date(data.updatedAt).toLocaleString()}`);
+        if (showAlert) alert('✅ Synced to cloud.');
+      } catch (error) {
+        updateCloudSyncStatus(error.message, true);
+        if (showAlert) alert(error.message);
+        throw error;
       }
     }
 
-    function restoreLatestBackupFromApp() {
-      const backup = getLatestBackupMeta();
-      if (!backup) {
-        alert((currentLang === 'zh')
-          ? '应用内还没有备份。'
-          : (currentLang === 'zh-TW')
-            ? '應用內還沒有備份。'
-            : 'No in-app backup found.');
+    async function loadCloudData(silent = false) {
+      if (!authToken) {
+        if (!silent) alert('Log in first to load cloud data.');
         return;
       }
-
-      const confirmText = (currentLang === 'zh')
-        ? '恢复后会用应用内最新备份覆盖当前数据，继续吗？'
-        : (currentLang === 'zh-TW')
-          ? '恢復後會用應用內最新備份覆蓋目前資料，繼續嗎？'
-          : 'This will replace current data with the latest in-app backup. Continue?';
-
-      if (!confirm(confirmText)) return;
-
-      decks = Array.isArray(backup.decks) ? backup.decks : [];
-      globalSettings = backup.settings || globalSettings;
-      currentLang = backup.lang || currentLang;
-      saveData();
-      hideSettingsModal();
-      applyTextSize();
-      updateNav();
-      render(0);
-      if (currentDeckId && decks.find(d => d.id === currentDeckId)) {
-        openDeck(currentDeckId);
-      } else {
-        currentDeckId = null;
+      try {
+        updateCloudSyncStatus('Loading cloud data...');
+        const data = await apiFetch('/sync', { method: 'GET' });
+        if (data.appData) {
+          isCloudLoading = true;
+          applyAppState(data.appData);
+          saveData(true);
+          isCloudLoading = false;
+          applyTextSize();
+          updateNav();
+          render(0);
+          if (currentDeckId) {
+            const deckStillExists = decks.find(d => d.id === currentDeckId);
+            if (deckStillExists) openDeck(currentDeckId);
+            else currentDeckId = null;
+          }
+          updateCloudSyncStatus(`Cloud data loaded: ${new Date(data.updatedAt).toLocaleString()}`);
+          if (!silent) alert('✅ Loaded cloud data.');
+        } else {
+          updateCloudSyncStatus('No cloud save yet. Saving your current local data now.');
+          await syncToCloud(false);
+          if (!silent) alert('No cloud save existed yet, so your current local data was uploaded.');
+        }
+      } catch (error) {
+        updateCloudSyncStatus(error.message, true);
+        if (!silent) alert(error.message);
+      } finally {
+        isCloudLoading = false;
       }
-      alert((currentLang === 'zh')
-        ? '✅ 已恢复应用内最新备份'
-        : (currentLang === 'zh-TW')
-          ? '✅ 已恢復應用內最新備份'
-          : '✅ Latest backup restored.');
     }
-
 
     function getTotalCards() {
       return decks.reduce((a, d) => a + (d.cards ? d.cards.length : 0), 0);
@@ -1494,22 +1562,6 @@ async function initSQL() {
       document.getElementById('text-size-label').textContent = getText('text_size');
       document.getElementById('language-label').innerHTML = 'Interface Language / 界面語言';
       document.getElementById('save-settings-btn').textContent = getText('save_settings');
-      document.getElementById('latest-backup-title').textContent = (currentLang === 'zh')
-        ? '应用内最新备份'
-        : (currentLang === 'zh-TW')
-          ? '應用內最新備份'
-          : 'Latest Backup';
-      document.getElementById('save-latest-backup-btn').textContent = (currentLang === 'zh')
-        ? '保存最新备份'
-        : (currentLang === 'zh-TW')
-          ? '保存最新備份'
-          : 'Save Latest Backup';
-      document.getElementById('restore-latest-backup-btn').textContent = (currentLang === 'zh')
-        ? '恢复最新备份'
-        : (currentLang === 'zh-TW')
-          ? '恢復最新備份'
-          : 'Restore Latest Backup';
-      updateLatestBackupUI();
 
       const container = document.getElementById('intervals-container');
       container.innerHTML = `<label style="display:block;margin-bottom:12px;">${getText('review_intervals')}</label>`;
@@ -1525,6 +1577,8 @@ async function initSQL() {
       slider.oninput = () => {
         document.getElementById('text-size-value').textContent = slider.value + 'px';
       };
+
+      updateCloudSyncUI();
     }
 
     function hideSettingsModal() { document.getElementById('settings-modal').style.display = 'none'; }
@@ -1559,10 +1613,14 @@ async function initSQL() {
       updateNav();
       if (decks.length === 0) {
         decks.push({ id: generateId(), name: "Demo Deck", description: "Your first deck", newPerDay: 20, cards: [] });
-        saveData();
+        saveData(true);
       }
       applyTextSize();
       navigateTo(0);
+      updateCloudSyncUI();
+      if (authToken) {
+        loadCloudData(true);
+      }
     }
 
     window.addEventListener('load', () => {
