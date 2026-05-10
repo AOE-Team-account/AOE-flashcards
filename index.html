@@ -585,6 +585,92 @@
 
     let SQL = null;
 
+    // Larger decks with audio/images can exceed localStorage's small quota.
+    // Store the full app state in IndexedDB instead, then keep only tiny metadata in localStorage.
+    const AOE_DB_NAME = 'aoe_flashcards_storage';
+    const AOE_DB_VERSION = 1;
+    const AOE_STORE_NAME = 'state';
+    let aoeDbPromise = null;
+    let lastSavedAt = null;
+
+    function openAoeDb() {
+      if (!('indexedDB' in window)) {
+        return Promise.reject(new Error('IndexedDB is not available in this browser.'));
+      }
+      if (aoeDbPromise) return aoeDbPromise;
+
+      aoeDbPromise = new Promise((resolve, reject) => {
+        const request = indexedDB.open(AOE_DB_NAME, AOE_DB_VERSION);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains(AOE_STORE_NAME)) {
+            db.createObjectStore(AOE_STORE_NAME);
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('Could not open IndexedDB.'));
+        request.onblocked = () => reject(new Error('Storage upgrade is blocked. Close other tabs of this app and try again.'));
+      });
+
+      return aoeDbPromise;
+    }
+
+    async function idbGet(key) {
+      const db = await openAoeDb();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(AOE_STORE_NAME, 'readonly');
+        const store = tx.objectStore(AOE_STORE_NAME);
+        const request = store.get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error(`Could not read ${key}.`));
+      });
+    }
+
+    async function idbSetMany(entries) {
+      const db = await openAoeDb();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(AOE_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(AOE_STORE_NAME);
+        entries.forEach(([key, value]) => store.put(value, key));
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error || new Error('Could not save app data.'));
+        tx.onabort = () => reject(tx.error || new Error('Save was aborted.'));
+      });
+    }
+
+    async function idbSet(key, value) {
+      return idbSetMany([[key, value]]);
+    }
+
+    function readLocalJson(key, fallback) {
+      try {
+        const value = localStorage.getItem(key);
+        return value ? JSON.parse(value) : fallback;
+      } catch (e) {
+        console.warn(`Could not read ${key} from localStorage`, e);
+        return fallback;
+      }
+    }
+
+    async function migrateLocalStorageToIndexedDB() {
+      const existingDecks = await idbGet('decks').catch(() => undefined);
+      if (existingDecks !== undefined) return;
+
+      const localDecks = readLocalJson('aoe_decks', null);
+      const localSettings = readLocalJson('aoe_settings', null);
+      const localLang = localStorage.getItem('aoe_lang');
+      const localSavedAt = localStorage.getItem('aoe_last_saved');
+
+      if (localDecks || localSettings || localLang || localSavedAt) {
+        await idbSetMany([
+          ['decks', Array.isArray(localDecks) ? localDecks : []],
+          ['settings', localSettings || globalSettings],
+          ['lang', localLang || currentLang],
+          ['last_saved', localSavedAt || String(Date.now())]
+        ]);
+      }
+    }
+
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
 
       async function initSQL() {
@@ -593,21 +679,70 @@
         SQL = await initSqlJs(config);
     }
 
-    function loadData() {
-      const savedDecks = localStorage.getItem('aoe_decks');
-      const savedSettings = localStorage.getItem('aoe_settings');
-      const savedLang = localStorage.getItem('aoe_lang');
-      if (savedDecks) decks = JSON.parse(savedDecks);
-      if (savedSettings) globalSettings = JSON.parse(savedSettings);
-      if (savedLang) currentLang = savedLang;
+    async function loadData() {
+      try {
+        await migrateLocalStorageToIndexedDB();
+        const [savedDecks, savedSettings, savedLang, savedAt] = await Promise.all([
+          idbGet('decks'),
+          idbGet('settings'),
+          idbGet('lang'),
+          idbGet('last_saved')
+        ]);
+
+        if (Array.isArray(savedDecks)) decks = savedDecks;
+        if (savedSettings && typeof savedSettings === 'object') {
+          globalSettings = { ...globalSettings, ...savedSettings };
+        }
+        if (savedLang) currentLang = savedLang;
+        lastSavedAt = savedAt || localStorage.getItem('aoe_last_saved');
+      } catch (e) {
+        console.warn('IndexedDB load failed; trying old localStorage data.', e);
+        const localDecks = readLocalJson('aoe_decks', null);
+        const localSettings = readLocalJson('aoe_settings', null);
+        const localLang = localStorage.getItem('aoe_lang');
+        if (Array.isArray(localDecks)) decks = localDecks;
+        if (localSettings && typeof localSettings === 'object') {
+          globalSettings = { ...globalSettings, ...localSettings };
+        }
+        if (localLang) currentLang = localLang;
+        lastSavedAt = localStorage.getItem('aoe_last_saved');
+      }
     }
 
-    function saveData() {
-      localStorage.setItem('aoe_decks', JSON.stringify(decks));
-      localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
-      localStorage.setItem('aoe_lang', currentLang);
-      localStorage.setItem('aoe_last_saved', String(Date.now()));
-      updateBackupStatus();
+    async function saveData(options = {}) {
+      const savedAt = String(Date.now());
+      lastSavedAt = savedAt;
+
+      try {
+        await idbSetMany([
+          ['decks', decks],
+          ['settings', globalSettings],
+          ['lang', currentLang],
+          ['last_saved', savedAt]
+        ]);
+
+        // Keep localStorage tiny so large imported audio/image decks do not hit its quota.
+        try {
+          localStorage.removeItem('aoe_decks');
+          localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
+          localStorage.setItem('aoe_lang', currentLang);
+          localStorage.setItem('aoe_last_saved', savedAt);
+        } catch (e) {
+          console.warn('Could not update small localStorage metadata.', e);
+        }
+
+        updateBackupStatus();
+        return true;
+      } catch (e) {
+        console.error('Save failed:', e);
+        const message = e && (e.name === 'QuotaExceededError' || String(e).includes('quota'))
+          ? 'Storage quota was still exceeded. Try freeing browser storage or importing a deck with smaller media files.'
+          : (e.message || String(e));
+        if (options.throwOnError) throw new Error(message);
+        alert(`Save failed.\n\n${message}`);
+        updateBackupStatus();
+        return false;
+      }
     }
 
     function buildBackupPayload() {
@@ -633,7 +768,7 @@
     function updateBackupStatus(message) {
       const el = document.getElementById('backup-status');
       if (!el) return;
-      const savedAt = localStorage.getItem('aoe_last_saved');
+      const savedAt = lastSavedAt || localStorage.getItem('aoe_last_saved');
       const base = getText('backup_last_saved', formatBackupTime(savedAt));
       el.innerHTML = message ? `${message}<br><span style="color:#94a3b8;">${base}</span>` : `<span style="color:#94a3b8;">${base}</span>`;
     }
@@ -651,7 +786,9 @@
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        localStorage.setItem('aoe_last_saved', String(payload.exportedAt));
+        lastSavedAt = String(payload.exportedAt);
+        idbSet('last_saved', lastSavedAt).catch(e => console.warn('Could not save export time.', e));
+        try { localStorage.setItem('aoe_last_saved', lastSavedAt); } catch (e) {}
         updateBackupStatus(getText('backup_ready'));
       } catch (e) {
         alert(e.message || e);
@@ -666,7 +803,7 @@
     function importBackupFile(file) {
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         try {
           const data = JSON.parse(event.target.result);
           if (!data || data.app !== 'AOE flashcards' || !Array.isArray(data.decks) || !data.settings) {
@@ -676,7 +813,7 @@
           decks = data.decks;
           globalSettings = data.settings;
           currentLang = data.language || 'en';
-          saveData();
+          await saveData({ throwOnError: true });
           hideSettingsModal();
           updateNav();
           applyTextSize();
@@ -1319,12 +1456,56 @@
       document.getElementById('import-modal').style.display = 'none';
     }
 
+    function getMediaMime(filename) {
+      const ext = (filename.split('.').pop() || '').toLowerCase();
+      if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+      if (ext === 'png') return 'image/png';
+      if (ext === 'gif') return 'image/gif';
+      if (ext === 'webp') return 'image/webp';
+      if (ext === 'svg') return 'image/svg+xml';
+      if (ext === 'mp3') return 'audio/mpeg';
+      if (ext === 'ogg') return 'audio/ogg';
+      if (ext === 'wav') return 'audio/wav';
+      if (ext === 'm4a') return 'audio/mp4';
+      if (ext === 'mp4') return 'video/mp4';
+      if (ext === 'webm') return 'video/webm';
+      return 'application/octet-stream';
+    }
+
+    function decodeHtmlEntities(text) {
+      const textarea = document.createElement('textarea');
+      textarea.innerHTML = text;
+      return textarea.value;
+    }
+
+    function collectAnkiMediaRefs(text, refs) {
+      if (!text) return;
+      let match;
+      const imgRegex = /<img[^>]*src=["']([^"']+)["'][^>]*>/gi;
+      while ((match = imgRegex.exec(text)) !== null) {
+        if (match[1]) refs.add(decodeHtmlEntities(match[1]));
+      }
+
+      const soundRegex = /\[sound:([^\]]+)\]/gi;
+      while ((match = soundRegex.exec(text)) !== null) {
+        if (match[1]) refs.add(decodeHtmlEntities(match[1]));
+      }
+    }
+
+    function cleanImportedField(text) {
+      return (text || '')
+        .replace(/<img[^>]*>/gi, '')
+        .replace(/\[sound:[^\]]+\]/gi, '')
+        .replace(/&nbsp;/gi, ' ')
+        .trim();
+    }
+
     async function handleImportFile(input) {
       const file = input.files[0];
       if (!file) return;
 
       const status = document.getElementById('import-status');
-      status.innerHTML = `<p>📦 Loading ${file.name}... (this may take a few seconds for large decks)</p>`;
+      status.innerHTML = `<p>📦 Loading ${file.name}... (large decks may take a little longer)</p>`;
 
       await initSQL();
 
@@ -1351,96 +1532,112 @@
           throw new Error('This appears to be a dummy database. Please re-export from Anki with "Support older Anki versions" checked.');
         }
 
-        const mediaMap = {};
-
-        const mediaJsonFile = zip.file('media');
-        if (mediaJsonFile) {
-          const mediaJsonText = await mediaJsonFile.async('string');
-          const mediaFilenameMap = JSON.parse(mediaJsonText);
-
-          for (const [indexStr, realFilename] of Object.entries(mediaFilenameMap)) {
-            const entry = zip.file(indexStr);
-            if (entry) {
-              const data = await entry.async('base64');
-              const ext = (realFilename.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
-              mediaMap[indexStr] = dataUrl;
-              mediaMap[realFilename] = dataUrl;
-            }
-          }
-        }
-
-        if (Object.keys(mediaMap).length === 0) {
-          const mediaFiles = Object.keys(zip.files).filter(name => 
-            name.match(/^\d+$/) || name.match(/\.(jpg|png|gif|mp3|ogg|wav|mp4|webm)$/i)
-          );
-          for (const fname of mediaFiles) {
-            const entry = zip.file(fname);
-            if (entry) {
-              const data = await entry.async('base64');
-              const ext = (fname.split('.').pop() || '').toLowerCase();
-              let mime = 'application/octet-stream';
-              if (['jpg','jpeg','png','gif'].includes(ext)) mime = 'image/';
-              else if (['mp3','ogg','wav'].includes(ext)) mime = 'audio/';
-              else if (['mp4','webm'].includes(ext)) mime = 'video/';
-              const dataUrl = `data:${mime}${ext};base64,${data}`;
-              mediaMap[fname] = dataUrl;
-            }
-          }
-        }
-
+        const rawNotes = [];
+        const referencedMedia = new Set();
         const notesStmt = db.prepare("SELECT flds FROM notes");
-        const importedCards = [];
 
         while (notesStmt.step()) {
           const row = notesStmt.get();
           const fields = (row[0] || '').split('\x1f');
-          let front = fields[0] || 'No front';
-          let back = fields[1] || (fields.slice(1).join(' • ') || 'No back');
+          const front = fields[0] || 'No front';
+          const back = fields[1] || (fields.slice(1).join(' • ') || 'No back');
+          collectAnkiMediaRefs(front, referencedMedia);
+          collectAnkiMediaRefs(back, referencedMedia);
+          rawNotes.push({ front, back });
+        }
 
+        notesStmt.free();
+        db.close();
+
+        status.innerHTML += `<p>📝 Found ${rawNotes.length} notes. Loading only the media files used by these notes...</p>`;
+
+        const mediaFilenameMap = {};
+        const reverseMediaFilenameMap = {};
+        const mediaJsonFile = zip.file('media');
+        if (mediaJsonFile) {
+          const mediaJsonText = await mediaJsonFile.async('string');
+          Object.assign(mediaFilenameMap, JSON.parse(mediaJsonText));
+          for (const [indexStr, realFilename] of Object.entries(mediaFilenameMap)) {
+            reverseMediaFilenameMap[realFilename] = indexStr;
+          }
+        }
+
+        const mediaMap = {};
+        let loadedMediaCount = 0;
+
+        async function loadMediaDataUrl(refName) {
+          const cleanName = decodeHtmlEntities(refName);
+          const mappedIndex = reverseMediaFilenameMap[cleanName];
+          const mappedRealName = mediaFilenameMap[cleanName];
+          const possibleNames = [mappedIndex, cleanName, mappedRealName].filter(Boolean);
+
+          let entry = null;
+          let displayName = cleanName;
+          for (const possibleName of possibleNames) {
+            entry = zip.file(possibleName);
+            if (entry) {
+              displayName = mediaFilenameMap[possibleName] || cleanName;
+              break;
+            }
+          }
+
+          if (!entry) return null;
+          const data = await entry.async('base64');
+          const dataUrl = `data:${getMediaMime(displayName)};base64,${data}`;
+          loadedMediaCount++;
+          return dataUrl;
+        }
+
+        const refs = Array.from(referencedMedia);
+        for (let i = 0; i < refs.length; i++) {
+          const ref = refs[i];
+          const dataUrl = await loadMediaDataUrl(ref);
+          if (dataUrl) mediaMap[ref] = dataUrl;
+          if (refs.length > 50 && (i + 1) % 50 === 0) {
+            status.innerHTML = `<p>📦 Loading ${file.name}...</p><p>📝 Found ${rawNotes.length} notes.</p><p>🎧 Loaded ${i + 1} / ${refs.length} referenced media files...</p>`;
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+        }
+
+        const importedCards = rawNotes.map(note => {
+          let front = note.front;
+          let back = note.back;
           let cardImage = null;
           let cardMedia = null;
 
-          Object.keys(mediaMap).forEach(key => {
-            const dataUrl = mediaMap[key];
+          function captureMedia(ref) {
+            const decodedRef = decodeHtmlEntities(ref);
+            return mediaMap[decodedRef] || mediaMap[ref] || null;
+          }
 
-            const imgRegex = new RegExp(`<img[^>]*src=["']${key}["'][^>]*>`, 'gi');
-            if (imgRegex.test(front)) {
-              cardImage = dataUrl;
-              front = front.replace(imgRegex, '').trim();
-            }
-            if (imgRegex.test(back)) {
-              cardImage = dataUrl;
-              back = back.replace(imgRegex, '').trim();
-            }
-
-            const soundRegex = new RegExp(`\\[sound:${key}\\]`, 'gi');
-            if (soundRegex.test(front)) {
-              cardMedia = dataUrl;
-              front = front.replace(soundRegex, '').trim();
-            }
-            if (soundRegex.test(back)) {
-              cardMedia = dataUrl;
-              back = back.replace(soundRegex, '').trim();
-            }
+          front = front.replace(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi, (full, src) => {
+            if (!cardImage) cardImage = captureMedia(src);
+            return '';
+          });
+          back = back.replace(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi, (full, src) => {
+            if (!cardImage) cardImage = captureMedia(src);
+            return '';
           });
 
-          importedCards.push({
+          front = front.replace(/\[sound:([^\]]+)\]/gi, (full, src) => {
+            if (!cardMedia) cardMedia = captureMedia(src);
+            return '';
+          });
+          back = back.replace(/\[sound:([^\]]+)\]/gi, (full, src) => {
+            if (!cardMedia) cardMedia = captureMedia(src);
+            return '';
+          });
+
+          return {
             id: generateId(),
-            front: front,
-            back: back,
+            front: cleanImportedField(front) || 'No front',
+            back: cleanImportedField(back) || 'No back',
             image: cardImage,
             media: cardMedia,
             section: 1,
             lastReviewed: null
-          });
-        }
-
-        notesStmt.free();
+          };
+        });
 
         const deckName = file.name.replace(/\.(apkg|colpkg|ofc)$/i, '') || 'Imported Deck';
         const newDeck = {
@@ -1453,9 +1650,9 @@
         };
 
         decks.push(newDeck);
-        saveData();
+        await saveData({ throwOnError: true });
 
-        status.innerHTML += `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards with images and audio!</p>`;
+        status.innerHTML = `<p style="color:#10b981;margin-top:12px;">✅ Successfully imported ${importedCards.length} cards and ${loadedMediaCount} media files. Large decks are now saved with IndexedDB storage.</p>`;
         
         setTimeout(() => {
           hideImportModal();
@@ -1536,12 +1733,26 @@
       alert((currentLang === 'zh' || currentLang === 'zh-TW') ? '✅ 設置已保存' : '✅ Settings saved.');
     }
 
-    function init() {
-      loadData();
+    async function requestPersistentStorage() {
+      try {
+        if (navigator.storage && navigator.storage.persist) {
+          await navigator.storage.persist();
+        }
+      } catch (e) {
+        console.warn('Persistent storage request was not granted.', e);
+      }
+    }
+
+    async function init() {
+      const main = document.getElementById('main-content');
+      if (main) main.innerHTML = '<div class="container" style="padding:32px;text-align:center;color:#64748b;">Loading flashcards...</div>';
+
+      await requestPersistentStorage();
+      await loadData();
       updateNav();
       if (decks.length === 0) {
         decks.push({ id: generateId(), name: "Demo Deck", description: "Your first deck", newPerDay: 20, cards: [] });
-        saveData();
+        await saveData();
       }
       applyTextSize();
       navigateTo(0);
@@ -1558,8 +1769,6 @@
       });
       init();
     });
-
-    window.onload = init;
   </script>
 </body>
 </html>
