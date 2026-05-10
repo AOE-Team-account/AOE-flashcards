@@ -592,6 +592,11 @@
     const AOE_STORE_NAME = 'state';
     let aoeDbPromise = null;
     let lastSavedAt = null;
+    let saveTimer = null;
+    let pendingSavePromise = Promise.resolve(true);
+    const SAVE_DEBOUNCE_MS = 900;
+    const CARD_LIST_BATCH_SIZE = 120;
+    let cardListVisibleCount = CARD_LIST_BATCH_SIZE;
 
     function openAoeDb() {
       if (!('indexedDB' in window)) {
@@ -709,7 +714,7 @@
       }
     }
 
-    async function saveData(options = {}) {
+    async function persistDataNow(options = {}) {
       const savedAt = String(Date.now());
       lastSavedAt = savedAt;
 
@@ -739,10 +744,61 @@
           ? 'Storage quota was still exceeded. Try freeing browser storage or importing a deck with smaller media files.'
           : (e.message || String(e));
         if (options.throwOnError) throw new Error(message);
-        alert(`Save failed.\n\n${message}`);
+        if (!options.silent) alert(`Save failed.\n\n${message}`);
         updateBackupStatus();
         return false;
       }
+    }
+
+    function saveSmallMetadataOnly() {
+      try {
+        localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
+        localStorage.setItem('aoe_lang', currentLang);
+        if (lastSavedAt) localStorage.setItem('aoe_last_saved', lastSavedAt);
+      } catch (e) {
+        // Ignore tiny metadata failures; the real data is in IndexedDB.
+      }
+      updateBackupStatus();
+    }
+
+    async function flushSaveData() {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        pendingSavePromise = pendingSavePromise
+          .catch(() => true)
+          .then(() => persistDataNow({ silent: true }));
+      }
+      return pendingSavePromise;
+    }
+
+    function saveData(options = {}) {
+      // Writing a large deck to IndexedDB is expensive because the browser must clone the
+      // full cards/media object. For normal study clicks, debounce the full write so the
+      // app stays responsive. Imports/backups can still force an immediate save.
+      if (options.immediate || options.throwOnError) {
+        if (saveTimer) {
+          clearTimeout(saveTimer);
+          saveTimer = null;
+        }
+        pendingSavePromise = pendingSavePromise
+          .catch(() => true)
+          .then(() => persistDataNow(options));
+        return pendingSavePromise;
+      }
+
+      lastSavedAt = String(Date.now());
+      saveSmallMetadataOnly();
+
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        saveTimer = null;
+        pendingSavePromise = pendingSavePromise
+          .catch(() => true)
+          .then(() => persistDataNow({ silent: true }));
+      }, SAVE_DEBOUNCE_MS);
+
+      return pendingSavePromise;
     }
 
     function buildBackupPayload() {
@@ -1155,6 +1211,76 @@
       render(0);
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function stripHtmlToText(value) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = String(value || '');
+      return (tmp.textContent || tmp.innerText || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function previewText(value, fallback, maxLength = 160) {
+      const clean = stripHtmlToText(value) || fallback;
+      return escapeHtml(clean.length > maxLength ? clean.slice(0, maxLength) + '…' : clean);
+    }
+
+    function renderCardList(deck, reset = true) {
+      const list = document.getElementById('card-list');
+      if (!list) return;
+      const cards = deck.cards || [];
+      if (reset) cardListVisibleCount = CARD_LIST_BATCH_SIZE;
+
+      const visibleCount = Math.min(cardListVisibleCount, cards.length);
+      const visibleCards = cards.slice(0, visibleCount);
+
+      if (!cards.length) {
+        list.innerHTML = `<p style="color:#64748b;text-align:center;padding:40px;">No cards in this deck yet</p>`;
+        return;
+      }
+
+      let listHTML = visibleCards.map(card => `
+        <div style="background:#f8fafc;border-radius:16px;padding:16px;margin-bottom:12px;position:relative;min-height:76px;">
+          <div style="font-weight:600;padding-right:118px;">${previewText(card.front, 'No front')}</div>
+          <div style="color:#64748b;margin-top:4px;padding-right:118px;">${previewText(card.back, 'No back')}</div>
+          <div style="color:#94a3b8;margin-top:8px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;">
+            <span>Section ${card.section || 1}</span>
+            ${card.image ? '<span>🖼 Image</span>' : ''}
+            ${card.media ? '<span>🔊 Media</span>' : ''}
+          </div>
+          <div style="position:absolute;top:12px;right:12px;display:flex;gap:8px;">
+            <button onclick="editCard('${card.id}');event.stopImmediatePropagation()" style="background:#e2e8f0;color:#64748b;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('edit')}</button>
+            <button onclick="deleteCard('${card.id}');event.stopImmediatePropagation()" style="background:#fee2e2;color:#ef4444;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('delete')}</button>
+          </div>
+        </div>
+      `).join('');
+
+      if (cards.length > visibleCount) {
+        listHTML += `
+          <div style="text-align:center;padding:18px;color:#64748b;">
+            <div style="margin-bottom:12px;">Showing ${visibleCount} of ${cards.length} cards</div>
+            <button onclick="showMoreCards()" class="btn" style="background:#e2e8f0;">Show next ${Math.min(CARD_LIST_BATCH_SIZE, cards.length - visibleCount)}</button>
+          </div>`;
+      } else {
+        listHTML += `<div style="text-align:center;padding:14px;color:#94a3b8;">Showing all ${cards.length} cards</div>`;
+      }
+
+      list.innerHTML = listHTML;
+    }
+
+    function showMoreCards() {
+      const deck = decks.find(d => d.id === currentDeckId);
+      if (!deck) return;
+      cardListVisibleCount += CARD_LIST_BATCH_SIZE;
+      renderCardList(deck, false);
+    }
+
     function openDeck(id) {
       currentDeckId = id;
       const deck = decks.find(d => d.id === id);
@@ -1178,19 +1304,7 @@
       }
       document.getElementById('section-stats').innerHTML = statsHTML;
 
-      let listHTML = deck.cards.map(card => `
-        <div style="background:#f8fafc;border-radius:16px;padding:16px;margin-bottom:12px;position:relative;">
-          <div style="font-weight:600;">${card.front || 'No front'}</div>
-          <div style="color:#64748b;margin-top:4px;">${card.back || 'No back'}</div>
-          ${card.image ? `<img src="${card.image}" class="media-preview">` : ''}
-          ${card.media ? `<div style="margin-top:8px;"><audio controls style="width:100%;"><source src="${card.media}"></audio></div>` : ''}
-          <div style="position:absolute;top:12px;right:12px;display:flex;gap:8px;">
-            <button onclick="editCard('${card.id}');event.stopImmediatePropagation()" style="background:#e2e8f0;color:#64748b;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('edit')}</button>
-            <button onclick="deleteCard('${card.id}');event.stopImmediatePropagation()" style="background:#fee2e2;color:#ef4444;padding:4px 12px;border-radius:9999px;font-size:13px;">${getText('delete')}</button>
-          </div>
-        </div>
-      `).join('') || `<p style="color:#64748b;text-align:center;padding:40px;">No cards in this deck yet</p>`;
-      document.getElementById('card-list').innerHTML = listHTML;
+      renderCardList(deck, true);
 
       document.getElementById('deck-detail-modal').style.display = 'flex';
       updateHalfYearButton();
@@ -1752,7 +1866,7 @@
       updateNav();
       if (decks.length === 0) {
         decks.push({ id: generateId(), name: "Demo Deck", description: "Your first deck", newPerDay: 20, cards: [] });
-        await saveData();
+        await saveData({ immediate: true });
       }
       applyTextSize();
       navigateTo(0);
@@ -1768,6 +1882,10 @@
         backupFileInput.value = '';
       });
       init();
+    });
+
+    window.addEventListener('pagehide', () => {
+      flushSaveData();
     });
   </script>
 </body>
