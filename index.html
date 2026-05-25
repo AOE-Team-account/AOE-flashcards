@@ -253,8 +253,8 @@
       <!-- CHANGED: Added tap-hint paragraph; rating-buttons starts hidden via inline style -->
       <p id="flip-hint" style="text-align:center;color:#94a3b8;font-size:15px;margin-top:8px;">👆 Tap the card to reveal the answer</p>
       <div id="rating-buttons" style="display:none;margin-top:32px;grid-template-columns:1fr 1fr;gap:16px;">
-        <button onclick="rateCard(false)" id="wrong-btn" style="background:#fee2e2;color:#b91c1c;padding:18px;font-size:18px;border-radius:9999px;"></button>
-        <button onclick="rateCard(true)" class="btn btn-primary" id="correct-btn" style="padding:18px;font-size:18px;"></button>
+        <button onclick="rateCard(false)" id="Unfamiliar-btn" style="background:#fee2e2;color:#b91c1c;padding:18px;font-size:18px;border-radius:9999px;"></button>
+        <button onclick="rateCard(true)" class="btn btn-primary" id="Familiar-btn" style="padding:18px;font-size:18px;"></button>
       </div>
     </div>
   </div>
@@ -289,8 +289,8 @@
 
       <div id="intervals-container"></div>
 
-      <label id="wrong-section-label" style="margin:24px 0 8px;display:block;"></label>
-      <input type="number" id="wrong-section" value="3" min="2" max="5" style="margin-bottom:24px;">
+      <label id="Unfamiliar-section-label" style="margin:24px 0 8px;display:block;"></label>
+      <input type="number" id="Unfamiliar-section" value="3" min="2" max="5" style="margin-bottom:24px;">
 
       <label id="half-year-label" class="flex items-center gap-3">
         <input type="checkbox" id="half-year-toggle" checked onchange="updateHalfYearButtonPreview()">
@@ -353,7 +353,7 @@
       newWordsPerDay: 20,
       numSections: 5,
       intervals: [0, 3, 7, 30, 365],
-      wrongSection: 3,
+      UnfamiliarSection: 3,
       halfYearMatureReview: true,
       textSize: 18
     };
@@ -401,7 +401,7 @@
         new_words_global: "New Words Per Day (global default)",
         num_sections: "Number of Review Sections",
         review_intervals: "Review Intervals (days) for each section",
-        wrong_section_label: "Wrong answer always goes to section",
+        Unfamiliar_section_label: "Unfamiliar answer always goes to section",
         enable_half_year: "Enable half-year mature review from section 5",
         text_size: "Text Size",
         save_settings: "Save Settings",
@@ -411,8 +411,8 @@
         import_failed: 'Import failed.<br><br>Please export from Anki with <strong>"Support older Anki versions"</strong> checked.',
         study_now_btn: "▶️ Study Now",
         half_year_btn: "🌍 Half-Year Mature Review",
-        wrong_btn: "✕ Wrong",
-        correct_btn: "✓ Correct",
+        Unfamiliar_btn: "✕ Unfamiliar",
+        Familiar_btn: "✓ Familiar",
         section_new: "New Words",
         section_review: "Review ({0} days)",
         section_done: "Done! (Yearly)",
@@ -471,7 +471,7 @@
         new_words_global: "每日新词数量（全局默认）",
         num_sections: "复习区间数量",
         review_intervals: "每个区间的复习间隔（天）",
-        wrong_section_label: "答错总是进入区间",
+        Unfamiliar_section_label: "答错总是进入区间",
         enable_half_year: "启用第5区间半年成熟复习",
         text_size: "文字大小",
         save_settings: "保存设置",
@@ -481,8 +481,8 @@
         import_failed: '导入失败。<br><br>请在 Anki 中勾选 <strong>"支持旧版 Anki"</strong> 后导出。',
         study_now_btn: "▶️ 开始学习",
         half_year_btn: "🌍 半年成熟复习",
-        wrong_btn: "✕ 错误",
-        correct_btn: "✓ 正确",
+        Unfamiliar_btn: "✕ 错误",
+        Familiar_btn: "✓ 正确",
         section_new: "新词",
         section_review: "复习 ({0} 天)",
         section_done: "已完成！(每年)",
@@ -541,7 +541,7 @@
         new_words_global: "每日新詞數量（全局預設）",
         num_sections: "複習區間數量",
         review_intervals: "每個區間的複習間隔（天）",
-        wrong_section_label: "答錯總是進入區間",
+        Unfamiliar_section_label: "答錯總是進入區間",
         enable_half_year: "啟用第5區間半年成熟複習",
         text_size: "文字大小",
         save_settings: "保存設置",
@@ -551,8 +551,8 @@
         import_failed: '導入失敗。<br><br>請在 Anki 中勾選 <strong>"支援舊版 Anki"</strong> 後導出。',
         study_now_btn: "▶️ 開始學習",
         half_year_btn: "🌍 半年成熟複習",
-        wrong_btn: "✕ 錯誤",
-        correct_btn: "✓ 正確",
+        Unfamiliar_btn: "✕ 錯誤",
+        Familiar_btn: "✓ 正確",
         section_new: "新詞",
         section_review: "複習 ({0} 天)",
         section_done: "已完成！(每年)",
@@ -1096,8 +1096,8 @@
       document.getElementById('rating-buttons').style.display = 'none';
       document.getElementById('flip-hint').style.display = 'block';
 
-      document.getElementById('wrong-btn').innerHTML = getText('wrong_btn');
-      document.getElementById('correct-btn').innerHTML = getText('correct_btn');
+      document.getElementById('Unfamiliar-btn').innerHTML = getText('Unfamiliar_btn');
+      document.getElementById('Familiar-btn').innerHTML = getText('Familiar_btn');
 
       applyTextSize();
     }
@@ -1146,18 +1146,18 @@
       }
     }
 
-    function rateCard(correct) {
+    function rateCard(Familiar) {
       const s = currentStudySession;
       const card = s.cards[s.index];
       card.lastReviewed = Date.now();
 
       if (s.mode === 'mature') {
-        if (!correct) card.section = globalSettings.wrongSection;
+        if (!Familiar) card.section = globalSettings.UnfamiliarSection;
       } else {
-        if (correct) {
+        if (Familiar) {
           card.section = Math.min(card.section + 1, globalSettings.numSections);
         } else {
-          card.section = globalSettings.wrongSection;
+          card.section = globalSettings.UnfamiliarSection;
         }
       }
 
@@ -1792,7 +1792,7 @@
       document.getElementById('settings-modal').style.display = 'flex';
       document.getElementById('global-new-per-day').value = globalSettings.newWordsPerDay;
       document.getElementById('num-sections').value = globalSettings.numSections;
-      document.getElementById('wrong-section').value = globalSettings.wrongSection;
+      document.getElementById('Unfamiliar-section').value = globalSettings.UnfamiliarSection;
       document.getElementById('half-year-toggle').checked = globalSettings.halfYearMatureReview;
       document.getElementById('language-select').value = currentLang;
       document.getElementById('text-size-slider').value = globalSettings.textSize || 18;
@@ -1801,7 +1801,7 @@
       document.getElementById('settings-title').textContent = getText('global_settings');
       document.getElementById('global-new-label').textContent = getText('new_words_global');
       document.getElementById('num-sections-label').textContent = getText('num_sections');
-      document.getElementById('wrong-section-label').textContent = getText('wrong_section_label');
+      document.getElementById('Unfamiliar-section-label').textContent = getText('Unfamiliar_section_label');
       document.getElementById('half-year-text').textContent = getText('enable_half_year');
       document.getElementById('text-size-label').textContent = getText('text_size');
       document.getElementById('language-label').innerHTML = 'Interface Language / 界面語言';
@@ -1833,7 +1833,7 @@
     function saveSettings() {
       globalSettings.newWordsPerDay = parseInt(document.getElementById('global-new-per-day').value) || 20;
       globalSettings.numSections = parseInt(document.getElementById('num-sections').value) || 5;
-      globalSettings.wrongSection = parseInt(document.getElementById('wrong-section').value) || 3;
+      globalSettings.UnfamiliarSection = parseInt(document.getElementById('Unfamiliar-section').value) || 3;
       globalSettings.halfYearMatureReview = document.getElementById('half-year-toggle').checked;
       globalSettings.textSize = parseInt(document.getElementById('text-size-slider').value) || 18;
 
