@@ -250,7 +250,9 @@
         </div>
       </div>
 
-      <div id="rating-buttons" style="display:none;margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <!-- CHANGED: Added tap-hint paragraph; rating-buttons starts hidden via inline style -->
+      <p id="flip-hint" style="text-align:center;color:#94a3b8;font-size:15px;margin-top:8px;">👆 Tap the card to reveal the answer</p>
+      <div id="rating-buttons" style="display:none;margin-top:32px;grid-template-columns:1fr 1fr;gap:16px;">
         <button onclick="rateCard(false)" id="wrong-btn" style="background:#fee2e2;color:#b91c1c;padding:18px;font-size:18px;border-radius:9999px;"></button>
         <button onclick="rateCard(true)" class="btn btn-primary" id="correct-btn" style="padding:18px;font-size:18px;"></button>
       </div>
@@ -344,6 +346,9 @@
     let audioChunks = [];
     let isRecording = false;
 
+    // CHANGED: Added flag to track whether the current card has been flipped at least once
+    let hasFlippedCurrentCard = false;
+
     let globalSettings = {
       newWordsPerDay: 20,
       numSections: 5,
@@ -365,7 +370,7 @@
         import: "Import",
         new_deck: "+ New Deck",
         no_decks: "No decks yet.",
-        tap_new: 'Tap “New Deck” to begin.',
+        tap_new: 'Tap "New Deck" to begin.',
         create_new_deck: "Create New Deck",
         deck_title: "Deck Title",
         description_optional: "Description (optional)",
@@ -403,7 +408,7 @@
         import_title: "Import Anki Deck (.apkg)",
         import_desc: "Select your .apkg file — real notes, fields, images & audio will be imported.",
         success_import: "Successfully imported {0} cards with clean text + real images & audio!",
-        import_failed: 'Import failed.<br><br>Please export from Anki with <strong>“Support older Anki versions”</strong> checked.',
+        import_failed: 'Import failed.<br><br>Please export from Anki with <strong>"Support older Anki versions"</strong> checked.',
         study_now_btn: "▶️ Study Now",
         half_year_btn: "🌍 Half-Year Mature Review",
         wrong_btn: "✕ Wrong",
@@ -435,7 +440,7 @@
         import: "导入",
         new_deck: "+ 新牌组",
         no_decks: "还没有牌组。",
-        tap_new: '点击“新牌组”开始。',
+        tap_new: '点击"新牌组"开始。',
         create_new_deck: "创建新牌组",
         deck_title: "牌组名称",
         description_optional: "描述（可选）",
@@ -473,7 +478,7 @@
         import_title: "导入 Anki 牌组 (.apkg)",
         import_desc: "选择您的 .apkg 文件 — 将导入真实笔记、字段、图片和音频。",
         success_import: "成功导入 {0} 张卡片，文本干净且带有真实图片和音频！",
-        import_failed: '导入失败。<br><br>请在 Anki 中勾选 <strong>“支持旧版 Anki”</strong> 后导出。',
+        import_failed: '导入失败。<br><br>请在 Anki 中勾选 <strong>"支持旧版 Anki"</strong> 后导出。',
         study_now_btn: "▶️ 开始学习",
         half_year_btn: "🌍 半年成熟复习",
         wrong_btn: "✕ 错误",
@@ -543,7 +548,7 @@
         import_title: "導入 Anki 牌組 (.apkg)",
         import_desc: "選擇您的 .apkg 檔案 — 將導入真實筆記、欄位、圖片和音頻。",
         success_import: "成功導入 {0} 張卡片，文字乾淨且帶有真實圖片和音頻！",
-        import_failed: '導入失敗。<br><br>請在 Anki 中勾選 <strong>“支援舊版 Anki”</strong> 後導出。',
+        import_failed: '導入失敗。<br><br>請在 Anki 中勾選 <strong>"支援舊版 Anki"</strong> 後導出。',
         study_now_btn: "▶️ 開始學習",
         half_year_btn: "🌍 半年成熟複習",
         wrong_btn: "✕ 錯誤",
@@ -573,7 +578,6 @@
       return text;
     }
 
-    // === MINIMAL CHANGE: Use midnight-to-midnight (12 AM to next 12 AM) ===
     function getDaysSince(lastReviewed) {
       if (!lastReviewed) return Infinity;
       const now = new Date();
@@ -585,8 +589,6 @@
 
     let SQL = null;
 
-    // Larger decks with audio/images can exceed localStorage's small quota.
-    // Store the full app state in IndexedDB instead, then keep only tiny metadata in localStorage.
     const AOE_DB_NAME = 'aoe_flashcards_storage';
     const AOE_DB_VERSION = 1;
     const AOE_STORE_NAME = 'state';
@@ -678,10 +680,10 @@
 
     function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2,5); }
 
-      async function initSQL() {
-        if (SQL) return;
-        const config = { locateFile: file => `./vendor/${file}` };
-        SQL = await initSqlJs(config);
+    async function initSQL() {
+      if (SQL) return;
+      const config = { locateFile: file => `./vendor/${file}` };
+      SQL = await initSqlJs(config);
     }
 
     async function loadData() {
@@ -726,7 +728,6 @@
           ['last_saved', savedAt]
         ]);
 
-        // Keep localStorage tiny so large imported audio/image decks do not hit its quota.
         try {
           localStorage.removeItem('aoe_decks');
           localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
@@ -755,9 +756,7 @@
         localStorage.setItem('aoe_settings', JSON.stringify(globalSettings));
         localStorage.setItem('aoe_lang', currentLang);
         if (lastSavedAt) localStorage.setItem('aoe_last_saved', lastSavedAt);
-      } catch (e) {
-        // Ignore tiny metadata failures; the real data is in IndexedDB.
-      }
+      } catch (e) {}
       updateBackupStatus();
     }
 
@@ -773,9 +772,6 @@
     }
 
     function saveData(options = {}) {
-      // Writing a large deck to IndexedDB is expensive because the browser must clone the
-      // full cards/media object. For normal study clicks, debounce the full write so the
-      // app stays responsive. Imports/backups can still force an immediate save.
       if (options.immediate || options.throwOnError) {
         if (saveTimer) {
           clearTimeout(saveTimer);
@@ -1094,7 +1090,12 @@
       const bVid = document.getElementById('back-video'); bVid.style.display = (card.media && card.media.includes('video')) ? 'block' : 'none'; if (card.media && card.media.includes('video')) bVid.src = card.media;
 
       document.getElementById('flashcard').classList.remove('flipped');
-      document.getElementById('rating-buttons').style.display = 'grid';
+
+      // CHANGED: Reset flip flag and hide rating buttons; show hint instead
+      hasFlippedCurrentCard = false;
+      document.getElementById('rating-buttons').style.display = 'none';
+      document.getElementById('flip-hint').style.display = 'block';
+
       document.getElementById('wrong-btn').innerHTML = getText('wrong_btn');
       document.getElementById('correct-btn').innerHTML = getText('correct_btn');
 
@@ -1134,8 +1135,15 @@
       document.getElementById('study-modal').style.display = 'flex';
     }
 
+    // CHANGED: flipCard now tracks first flip and reveals rating buttons + hides hint
     function flipCard() {
       document.getElementById('flashcard').classList.toggle('flipped');
+
+      if (!hasFlippedCurrentCard) {
+        hasFlippedCurrentCard = true;
+        document.getElementById('rating-buttons').style.display = 'grid';
+        document.getElementById('flip-hint').style.display = 'none';
+      }
     }
 
     function rateCard(correct) {
