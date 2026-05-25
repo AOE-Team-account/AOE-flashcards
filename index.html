@@ -251,7 +251,7 @@
       </div>
 
       <!-- CHANGED: Added tap-hint paragraph; rating-buttons starts hidden via inline style -->
-      <p id="flip-hint" style="text-align:center;color:#94a3b8;font-size:15px;margin-top:8px;">👆 Tap the card to reveal the answer</p>
+      <p id="flip-hint" style="text-align:center;color:#94a3b8;font-size:15px;margin-top:8px;"></p>
       <div id="rating-buttons" style="display:none;margin-top:32px;grid-template-columns:1fr 1fr;gap:16px;">
         <button onclick="rateCard(false)" id="Unfamiliar-btn" style="background:#fee2e2;color:#b91c1c;padding:18px;font-size:18px;border-radius:9999px;"></button>
         <button onclick="rateCard(true)" class="btn btn-primary" id="Familiar-btn" style="padding:18px;font-size:18px;"></button>
@@ -481,8 +481,8 @@
         import_failed: '导入失败。<br><br>请在 Anki 中勾选 <strong>"支持旧版 Anki"</strong> 后导出。',
         study_now_btn: "▶️ 开始学习",
         half_year_btn: "🌍 半年成熟复习",
-        Unfamiliar_btn: "✕ 错误",
-        Familiar_btn: "✓ 正确",
+        Unfamiliar_btn: "✕ 陌生",
+        Familiar_btn: "✓ 熟悉",
         section_new: "新词",
         section_review: "复习 ({0} 天)",
         section_done: "已完成！(每年)",
@@ -1096,7 +1096,9 @@ currentStudySession.newCount = 0;
       // CHANGED: Reset flip flag and hide rating buttons; show hint instead
       hasFlippedCurrentCard = false;
       document.getElementById('rating-buttons').style.display = 'none';
-      document.getElementById('flip-hint').style.display = 'block';
+const flipHintTexts = { 'en': '👆 Tap the card to reveal the answer', 'zh': '👆 点击卡片查看答案', 'zh-TW': '👆 點擊卡片查看答案' };
+document.getElementById('flip-hint').textContent = flipHintTexts[currentLang] || flipHintTexts['en'];
+document.getElementById('flip-hint').style.display = 'block';
 
       document.getElementById('Unfamiliar-btn').innerHTML = getText('Unfamiliar_btn');
       document.getElementById('Familiar-btn').innerHTML = getText('Familiar_btn');
