@@ -1057,11 +1057,13 @@
           newIntroduced >= limit) {
         
         const msg = `You've reached your daily word limit of ${limit}!\n\nContinue anyway?`;
-        if (!confirm(msg)) {
-          hideStudyModal();
-          render(0);
-          return false;
-        }
+if (!confirm(msg)) {
+  hideStudyModal();
+  render(0);
+  return false;
+}
+// CHANGED: Reset the new word counter so the limit prompt won't fire again this session
+currentStudySession.newCount = 0;
       }
       return true;
     }
